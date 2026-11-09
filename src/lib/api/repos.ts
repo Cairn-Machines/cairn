@@ -7,8 +7,8 @@
  */
 
 /**
- * git@github.com:montytorr/cairn.git, https://github.com/montytorr/cairn.git
- * and https://user:token@github.com/montytorr/cairn/ are one repository.
+ * git@github.com:Cairn-Machines/cairn.git, https://github.com/Cairn-Machines/cairn.git
+ * and https://user:token@github.com/Cairn-Machines/cairn/ are one repository.
  *
  * Normalising on the server keeps the rule in one place, so the CLI, the MCP
  * facade and an import all reach the same row. Everything stripped here is

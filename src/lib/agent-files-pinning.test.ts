@@ -168,7 +168,7 @@ describe.skipIf(SYSTEM_TARGETS)('sync-agent-files --source release', () => {
     const home = await machine(base)
 
     const result = await sync(home, [
-      '--source', 'https://raw.githubusercontent.com/montytorr/cairn/main',
+      '--source', 'https://raw.githubusercontent.com/Cairn-Machines/cairn/main',
       '--repo', `${base}/raw`,
     ])
 
@@ -322,7 +322,7 @@ describe('install-cron — the agent-files job source', () => {
   it('schedules the release the instance runs, from the public repository, never main', async () => {
     const { code, line } = await plan()
     expect(code).toBe(0)
-    expect(line).toContain("'--source' 'release' '--repo' 'https://raw.githubusercontent.com/montytorr/cairn'")
+    expect(line).toContain("'--source' 'release' '--repo' 'https://raw.githubusercontent.com/Cairn-Machines/cairn'")
     expect(line).not.toContain('/main')
     expect(line).not.toContain('--unpinned')
   })

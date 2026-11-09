@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Open a [private security advisory](https://github.com/montytorr/cairn/security/advisories/new).
+Open a [private security advisory](https://github.com/Cairn-Machines/cairn/security/advisories/new).
 Please do not open a public issue for anything exploitable.
 
 This is a personal project maintained in the open, so there is no response-time

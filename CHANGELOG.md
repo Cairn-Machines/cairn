@@ -9,6 +9,15 @@ out under **Breaking** with what to do about it.
 
 ## [Unreleased]
 
+### Changed
+
+- **Cairn lives at `github.com/Cairn-Machines/cairn`.** The repository moved from
+  `montytorr/cairn`, and every default now names the org: `install.sh`, `cairn setup`
+  (`CAIRN_REPO`), the scheduled sync job's release source, and the changelog page. GitHub
+  redirects the old URLs, so an existing install keeps syncing and moves to the new
+  source by itself at this release. A downstream mirror that merges `production` should
+  point its upstream at the new URL; nothing else changes for it.
+
 ## [0.25.6] — 2026-11-06
 
 ### Fixed

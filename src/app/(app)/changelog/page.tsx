@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 
 export const metadata: Metadata = { title: 'Changelog' }
 
-const REPO = 'https://github.com/montytorr/cairn'
+const REPO = 'https://github.com/Cairn-Machines/cairn'
 
 /**
  * CHANGELOG.md, as this build shipped it. Read from disk rather than fetched

@@ -3,11 +3,11 @@
   "version": "0.25.6",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/montytorr/cairn.git"
+    "url": "git+https://github.com/Cairn-Machines/cairn.git"
   },
-  "homepage": "https://github.com/montytorr/cairn#readme",
+  "homepage": "https://github.com/Cairn-Machines/cairn#readme",
   "bugs": {
-    "url": "https://github.com/montytorr/cairn/issues"
+    "url": "https://github.com/Cairn-Machines/cairn/issues"
   },
   "keywords": [
     "agents",

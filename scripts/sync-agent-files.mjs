@@ -368,7 +368,7 @@ const refuse = (why) => {
   process.exit(1)
 }
 
-const DEFAULT_REPO = 'https://raw.githubusercontent.com/montytorr/cairn'
+const DEFAULT_REPO = 'https://raw.githubusercontent.com/Cairn-Machines/cairn'
 
 /**
  * The URL every scheduled job was rendered with before #110.

@@ -26,7 +26,7 @@ requests, and any space where someone is speaking for Cairn.
 ## Enforcement
 
 Report anything that needs attention to the maintainer through GitHub — a private
-[security advisory](https://github.com/montytorr/cairn/security/advisories/new) works for
+[security advisory](https://github.com/Cairn-Machines/cairn/security/advisories/new) works for
 anything sensitive, and reaches only the maintainer.
 
 Reports are handled privately. Responses range from a request to change behaviour, to

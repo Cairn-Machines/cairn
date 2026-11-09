@@ -130,7 +130,7 @@ const refuseSetting = (why) => {
  * `--source` also means something to `--run` (below): the tree to use for that
  * one run. Here, on --install or the printed plan, it is what gets scheduled.
  */
-const DEFAULT_REPO = 'https://raw.githubusercontent.com/montytorr/cairn'
+const DEFAULT_REPO = 'https://raw.githubusercontent.com/Cairn-Machines/cairn'
 const RAW_BASE = env('CAIRN_RAW_BASE', '')
 rejectUnsafeEnvValue('CAIRN_RAW_BASE', RAW_BASE)
 const GITHUB_REPO = env('CAIRN_REPO', '')

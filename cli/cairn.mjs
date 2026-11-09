@@ -7153,7 +7153,7 @@ const commands = {
     // The repository the release comes from, and the one the agent-files job
     // then follows: CAIRN_REPO, as install.sh reads it, so a machine installed
     // from a fork is not handed the public release half way through (#110).
-    const setupRepo = process.env.CAIRN_REPO?.trim() || 'montytorr/cairn'
+    const setupRepo = process.env.CAIRN_REPO?.trim() || 'Cairn-Machines/cairn'
     if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(setupRepo) || setupRepo.includes('..') || /(^|\/)\.(\/|$)/.test(setupRepo)) {
       die(`CAIRN_REPO=${JSON.stringify(setupRepo)} is not <owner>/<name>`)
     }

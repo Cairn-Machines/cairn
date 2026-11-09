@@ -1,7 +1,7 @@
 ---
 name: cairn-briefing
 description: "Inject the Cairn lifecycle rule and a live `cairn context` briefing at agent bootstrap"
-homepage: https://github.com/montytorr/cairn/blob/main/docs/openclaw.md
+homepage: https://github.com/Cairn-Machines/cairn/blob/main/docs/openclaw.md
 metadata: { "openclaw": { "events": ["agent:bootstrap"] } }
 ---
 

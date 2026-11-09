@@ -1,7 +1,7 @@
 #!/bin/sh
 # Connect a machine to Cairn in one line:
 #
-#   curl -fsSL https://raw.githubusercontent.com/montytorr/cairn/main/install.sh | sh -s -- --url https://your-cairn
+#   curl -fsSL https://raw.githubusercontent.com/Cairn-Machines/cairn/main/install.sh | sh -s -- --url https://your-cairn
 #
 # This script does exactly two things: put a recent cli/cairn.mjs on PATH,
 # and hand off to it. Everything else -- pairing keys, the skill, the hooks,
@@ -23,7 +23,7 @@ set -eu
 # Everything in one function, called on the last line: a download cut off
 # halfway defines a function it never calls, instead of running half a script.
 main() {
-  REPO="${CAIRN_REPO:-montytorr/cairn}"
+  REPO="${CAIRN_REPO:-Cairn-Machines/cairn}"
   BIN_DIR="$HOME/.local/bin"
   BIN="$BIN_DIR/cairn"
 

@@ -1,8 +1,8 @@
 # Cairn
 
-[![CI](https://github.com/montytorr/cairn/actions/workflows/ci.yml/badge.svg)](https://github.com/montytorr/cairn/actions/workflows/ci.yml)
+[![CI](https://github.com/Cairn-Machines/cairn/actions/workflows/ci.yml/badge.svg)](https://github.com/Cairn-Machines/cairn/actions/workflows/ci.yml)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](./LICENSE)
-[![Version](https://img.shields.io/github/v/release/montytorr/cairn?label=version)](./CHANGELOG.md)
+[![Version](https://img.shields.io/github/v/release/Cairn-Machines/cairn?label=version)](./CHANGELOG.md)
 
 **The tracker your agents read before they start, and write to as they work.**
 
@@ -41,7 +41,7 @@ connects with one command, which pairs its keys in your browser and installs the
 and hooks:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/montytorr/cairn/main/install.sh | sh -s -- --url https://your-cairn
+curl -fsSL https://raw.githubusercontent.com/Cairn-Machines/cairn/main/install.sh | sh -s -- --url https://your-cairn
 ```
 
 It holds **four stores**, and one verb — `cairn check` — searches all four in a single
@@ -696,7 +696,7 @@ skill, wires the hooks, and installs the `agent-files` job that keeps those copi
 current. Any member can run it; no administrator is needed for their own agents.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/montytorr/cairn/main/install.sh | sh -s -- --url https://your-cairn
+curl -fsSL https://raw.githubusercontent.com/Cairn-Machines/cairn/main/install.sh | sh -s -- --url https://your-cairn
 ```
 
 `install.sh` only checks for Node 22+, puts the latest release's `cli/cairn.mjs` in
@@ -1555,21 +1555,21 @@ Cairn is a personal tool, so every contribution from outside it is worth naming.
 
 - **[@webcoder31](https://github.com/webcoder31)** — found that project identity was keyed
   on a filesystem path, so the briefing went silent in a `git worktree` or a second clone,
-  and sent the fix ([#2](https://github.com/montytorr/cairn/issues/2),
-  [#3](https://github.com/montytorr/cairn/pull/3)); that a key rename orphaned every task
+  and sent the fix ([#2](https://github.com/Cairn-Machines/cairn/issues/2),
+  [#3](https://github.com/Cairn-Machines/cairn/pull/3)); that a key rename orphaned every task
   ref already written into commits and notes
-  ([#4](https://github.com/montytorr/cairn/issues/4)); that `next dev` was quietly
+  ([#4](https://github.com/Cairn-Machines/cairn/issues/4)); that `next dev` was quietly
   eating the agent guide's byte budget
-  ([#1](https://github.com/montytorr/cairn/issues/1)); and that the browser UI could not
+  ([#1](https://github.com/Cairn-Machines/cairn/issues/1)); and that the browser UI could not
   write behind a TLS-terminating proxy, with the fix
-  ([#42](https://github.com/montytorr/cairn/issues/42),
-  [#43](https://github.com/montytorr/cairn/pull/43)).
+  ([#42](https://github.com/Cairn-Machines/cairn/issues/42),
+  [#43](https://github.com/Cairn-Machines/cairn/pull/43)).
 - **[@jgiffard](https://github.com/jgiffard)** — the shared multi-user workspace
-  ([#5](https://github.com/montytorr/cairn/pull/5)), a configurable backup role
-  ([#55](https://github.com/montytorr/cairn/pull/55)), Hermes Agent support
-  ([#61](https://github.com/montytorr/cairn/pull/61)), session checkpoints without closing
-  ([#67](https://github.com/montytorr/cairn/pull/67)), the project-scoped briefing
-  ([#68](https://github.com/montytorr/cairn/pull/68)), and the proposal that became
+  ([#5](https://github.com/Cairn-Machines/cairn/pull/5)), a configurable backup role
+  ([#55](https://github.com/Cairn-Machines/cairn/pull/55)), Hermes Agent support
+  ([#61](https://github.com/Cairn-Machines/cairn/pull/61)), session checkpoints without closing
+  ([#67](https://github.com/Cairn-Machines/cairn/pull/67)), the project-scoped briefing
+  ([#68](https://github.com/Cairn-Machines/cairn/pull/68)), and the proposal that became
   several instances on one machine.
 
 A report that leads to a fix is credited here the same way a patch is. Finding the problem
