@@ -32,7 +32,7 @@ permissions:
 
 jobs:
   move:
-    if: github.repository == 'montytorr/cairn' && !github.event.release.prerelease
+    if: github.repository == 'Cairn-Machines/cairn' && !github.event.release.prerelease
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

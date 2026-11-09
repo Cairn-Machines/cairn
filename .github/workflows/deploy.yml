@@ -25,7 +25,7 @@ jobs:
     # (another organisation's copy, deploying its own way) would otherwise
     # queue this job forever waiting for a runner labelled `cairn`.
     if: >-
-      github.repository == 'montytorr/cairn' &&
+      github.repository == 'Cairn-Machines/cairn' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
