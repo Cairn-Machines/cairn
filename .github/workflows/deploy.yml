@@ -75,8 +75,6 @@ jobs:
             annotation="${annotation//$'\r'/%0D}"
             annotation="${annotation//$'\n'/%0A}"
             echo "::error::$annotation"
-            line="${message//$'\n'/ }"
-            sudo /usr/local/bin/cairn-discord-send "🛑 Cairn deploy refused \`${SHA:0:7}\` $line" || echo "::warning::Discord refusal notification failed"
             exit 1
           fi
 
@@ -94,19 +92,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-
-      - name: notify push and deploy start
-        env:
-          PUSHER: ${{ github.actor }}
-        run: |
-          set -euo pipefail
-          short="${DEPLOY_SHA::7}"
-          subject="$(git log -1 --pretty=%s | head -c 180)"
-          subject="${subject//@/＠}"
-          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          printf -v message '📦 **Cairn pushed** `%s` to `main` by %s\n%s\n🚀 Deploy started · <%s>' \
-            "$short" "$PUSHER" "$subject" "$run_url"
-          sudo /usr/local/bin/cairn-discord-send "$message" || echo "::warning::Discord start notification failed"
 
       - name: link runtime configuration
         # Secrets live outside the workspace, owned by the runner user, and
@@ -357,18 +342,3 @@ jobs:
             [ -n "$restored" ] || { echo "::error::$container did not become healthy after the rollback — the site may be down"; exit 1; }
           done
           exit 1   # the deploy still failed; say so
-
-      - name: notify deploy result
-        if: always()
-        env:
-          DEPLOY_STATUS: ${{ job.status }}
-        run: |
-          set -u
-          short="${DEPLOY_SHA::7}"
-          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          case "$DEPLOY_STATUS" in
-            success) message="✅ **Cairn deployed** \`${short}\` · healthy and smoke-tested · <${run_url}>" ;;
-            cancelled) message="⚠️ **Cairn deploy cancelled** \`${short}\` · <${run_url}>" ;;
-            *) message="❌ **Cairn deploy failed** \`${short}\` · rollback attempted · <${run_url}>" ;;
-          esac
-          sudo /usr/local/bin/cairn-discord-send "$message" || echo "::warning::Discord result notification failed"
