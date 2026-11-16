@@ -126,7 +126,7 @@ describe('deploy version command', () => {
 })
 
 describe('deploy workflow version boundary', () => {
-  it('fails the gate with an annotation and best effort Discord, before the deploy job', () => {
+  it('fails the gate with an annotation, before the deploy job, and posts nothing to Discord', () => {
     const workflow = readFileSync(join(process.cwd(), '.github/workflows/deploy.yml'), 'utf8')
     const gate = workflow.split('\n  gate:\n')[1]!.split('\n  deploy:\n')[0]!
     expect(gate).toMatch(/uses: actions\/checkout@v4[\s\S]*ref: \$\{\{ github.event.workflow_run.head_sha \}\}[\s\S]*fetch-depth: 0\n\s+fetch-tags: true/)
@@ -136,14 +136,13 @@ describe('deploy workflow version boundary', () => {
     expect(gate).not.toContain('roll back on failure')
     const body = gate.split('      - name: guard deploy version\n')[1]!.split('        run: |\n')[1]!
       .split('\n').map((line) => line.replace(/^          /, '')).join('\n')
-    // Exercise the real gate shell with a refusal and a failed notifier.
+    // Exercise the real gate shell with a refusal; GitHub events reach Cairn OS's Howff by webhook, so the gate posts nowhere itself.
     const result = spawnSync('bash', ['-c', `node() { printf '%s\\n' 'refusal 100% detail' >&2; return 1; }\nsudo() { printf 'NOTIFY %s\\n' "$*"; return 1; }\n${body}`], {
       cwd: temp(), encoding: 'utf8', env: { ...process.env, SHA: 'abcdef012345' },
     })
     expect(result.status).toBe(1)
     expect(result.stdout).toContain('::error::refusal 100%25 detail')
-    expect(result.stdout).toContain('🛑 Cairn deploy refused `abcdef0` refusal 100% detail')
-    expect(result.stdout).toContain('::warning::Discord refusal notification failed')
-    expect(result.stdout.match(/NOTIFY /g)).toHaveLength(1)
+    expect(result.stdout).not.toContain('NOTIFY ')
+    expect(workflow).not.toContain('cairn-discord-send')
   })
 })
