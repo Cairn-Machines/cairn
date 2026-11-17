@@ -4,6 +4,9 @@
       "notify"
     ]
   },
+  "setup": [
+    "npm ci"
+  ],
   "checks": [
     "npm ci",
     "npm run typecheck",

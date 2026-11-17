@@ -112,6 +112,7 @@ describe('a ref whose key is no project here', () => {
     try {
       await client.query('begin')
       await client.query('set local enable_seqscan = off')
+      await client.query('set local enable_bitmapscan = off')
       const { rows } = await client.query(
         `explain select id from tasks
           where external_ref is not null
