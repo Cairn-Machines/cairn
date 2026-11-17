@@ -4,6 +4,13 @@
       "notify"
     ]
   },
+  "setup": [
+    "npm ci"
+  ],
+  "quickChecks": [
+    "npm run typecheck",
+    "npm run lint"
+  ],
   "checks": [
     "npm ci",
     "npm run typecheck",
