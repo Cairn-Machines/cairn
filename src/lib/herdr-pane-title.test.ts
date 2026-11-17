@@ -40,7 +40,7 @@ const servers: Server[] = []
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((s) => new Promise((done) => s.close(done))))
-  await Promise.all(directories.splice(0).map((d) => rm(d, { recursive: true, force: true })))
+  await Promise.all(directories.splice(0).map((d) => rm(d, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })))
 })
 
 const scratch = async () => {
