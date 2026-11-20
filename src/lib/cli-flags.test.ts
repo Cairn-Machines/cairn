@@ -83,6 +83,15 @@ describe('KNOWN_FLAGS', () => {
    * `dry-run`, not `dryRun`. So a camelCase read is not a style choice, it is
    * dead code: permanently undefined, and silent about it.
    */
+  it('AC5 carries --override-claim from done and cancel to the PATCH body and the MCP done tool', () => {
+    expect(knownFlags().has('override-claim')).toBe(true)
+    expect(helpFlags().has('override-claim')).toBe(true)
+    expect(source).toMatch(/if \(flags\['override-claim'\]\) body\.overrideClaim = true/)
+    const mcp = readFileSync(join(process.cwd(), 'mcp/server.mjs'), 'utf8')
+    expect(mcp).toContain('override_claim: {')
+    expect(mcp).toContain("a.override_claim ? ['--override-claim']")
+  })
+
   it('has no camelCase reads, which could never match a parsed flag', () => {
     const camel = [...new Set([...withoutComments().matchAll(/flags\.([a-z]+[A-Z][A-Za-z0-9]*)/g)].map((m) => m[1]!))]
     expect(camel, `flags.${camel.join(', flags.')} can never be set: the parser keys on the literal flag name`).toEqual([])

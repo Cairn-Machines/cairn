@@ -208,6 +208,8 @@ export const updateTaskSchema = taskFields.partial().extend({
   /** Where it came from in another tool. `null` clears it. */
   externalRef: externalRefField.nullable().optional(),
   externalUrl: externalUrlField.nullable().optional(),
+  /** Close over another holder's live claim, leaving a note that names both. */
+  overrideClaim: z.boolean().optional(),
 }).superRefine(validateLabelPatch)
 
 export const createNoteSchema = z.object({

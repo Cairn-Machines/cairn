@@ -1,5 +1,43 @@
-import { describe, expect, it } from 'vitest'
-import { canRenewClaim, isAnotherSessionsClaim, shouldClaimByWorking } from './claim'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { canRenewClaim, closeOverClaim, closeRefusalMessage, isAnotherSessionsClaim, overrideNote, shouldClaimByWorking } from './claim'
+
+describe('closing over a claim', () => {
+  const NOW = new Date('2026-11-20T12:00:00.000Z')
+  const ago = (seconds: number) => new Date(NOW.getTime() - seconds * 1000).toISOString()
+  const me = { actorId: 'claude-code · Cal', sessionId: 'session-a' }
+
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOW) })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('AC4 closes freely: unclaimed, own claim, a missing session on either side, or a stale lease', () => {
+    expect(closeOverClaim(me, { claimed_by: null })).toBeNull()
+    expect(closeOverClaim(me, { claimed_by: me.actorId, claimed_session: 'session-a', heartbeat_at: ago(30) })).toBeNull()
+    expect(closeOverClaim(me, { claimed_by: me.actorId, claimed_session: null, heartbeat_at: ago(30) })).toBeNull()
+    expect(closeOverClaim({ ...me, sessionId: null }, { claimed_by: me.actorId, claimed_session: 'session-b', heartbeat_at: ago(30) })).toBeNull()
+    expect(closeOverClaim(me, { claimed_by: 'codex · Cal', claimed_session: 's', heartbeat_at: ago(16 * 60) })).toBeNull()
+  })
+
+  it('AC1 refuses another actor, and AC2 another session of the same actor, naming the holder and beat', () => {
+    const other = closeOverClaim(me, { claimed_by: 'codex · Cal', claimed_session: 's1', heartbeat_at: ago(120) })
+    expect(other).toEqual({ holder: 'codex · Cal', session: 's1', heartbeatAt: ago(120), agoMinutes: 2 })
+    expect(closeRefusalMessage(other!)).toMatch(/^Held by codex · Cal, last heartbeat 2m ago\. .*--override-claim/)
+    expect(closeOverClaim(me, { claimed_by: me.actorId, claimed_session: 'session-b', heartbeat_at: ago(30) }))
+      .toMatchObject({ holder: me.actorId, session: 'session-b' })
+  })
+
+  it('AC8 treats 14m59s of silence as live and 15m01s as stale', () => {
+    const held = (seconds: number) => closeOverClaim(me, { claimed_by: 'codex · Cal', heartbeat_at: ago(seconds) })
+    expect(held(14 * 60 + 59)).not.toBeNull()
+    expect(held(15 * 60 + 1)).toBeNull()
+  })
+
+  it('AC9 builds the override note from the caller and the stored claim alone', () => {
+    expect(overrideNote('claude-code · Cal', { holder: 'codex · Bob', session: 's9' }))
+      .toBe('Closed over a live claim: claude-code · Cal overrode codex · Bob (session s9) with --override-claim.')
+    expect(overrideNote('claude-code · Cal', { holder: 'codex · Bob', session: null }))
+      .not.toContain('session')
+  })
+})
 
 /**
  * Writing to a task's work log is working on it.

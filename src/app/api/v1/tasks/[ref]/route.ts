@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { route } from '@/lib/api/handler'
 import { ok, fail } from '@/lib/api/response'
@@ -7,6 +8,8 @@ import { diffTaskEvents, recordActivity } from '@/lib/api/activity'
 import { findTask, noSuchTaskMessage, refuseArchived, renameFields, resolveParent, resolveTask } from '@/lib/api/tasks'
 import { formerKeysByProject, formerRefsOf, projectsForKeys, resolveProject } from '@/lib/api/project-keys'
 import { buildDigest, looksLikeDigestClip } from '@/lib/api/digest'
+import { closeOverClaim, closeRefusalMessage, overrideNote } from '@/lib/api/claim'
+import { CLAIM_LEASE_SECONDS, isClaimStale } from '@/lib/utils'
 import { mentionsOf } from '@/lib/api/mentions'
 import { peopleByIds, resolveAssignee, withAssignee } from '@/lib/api/people'
 import { removeAttachments } from '@/lib/attachments'
@@ -242,6 +245,13 @@ export const PATCH = route<{ ref: string }, z.infer<typeof patchBody>>({
     // Finishing a task releases it. Without this the claim outlives the work,
     // and a board where done tasks still show a holder makes the one field an
     // agent checks before picking something up untrustworthy.
+    const closing = Boolean(body.status && isTerminal(body.status))
+    const foreign = closing ? closeOverClaim(actor, task as Record<string, unknown>) : null
+    if (foreign && !body.overrideClaim) {
+      return fail('already_claimed', closeRefusalMessage(foreign), {
+        claimedBy: foreign.holder, heartbeatAt: foreign.heartbeatAt,
+      })
+    }
     if (body.status && isTerminal(body.status) && task.claimed_by) {
       patch.claimed_by = null
       // The session goes with the claim. Left behind, it answers "which
@@ -344,15 +354,50 @@ export const PATCH = route<{ ref: string }, z.infer<typeof patchBody>>({
       return fail('validation_failed', 'No fields to update.')
     }
 
+    const pinnedClose = async () => {
+      let write = admin().from('tasks').update(patch).eq('id', task.id)
+      const readHolder = (task.claimed_by as string | null) ?? null
+      const readSession = (task.claimed_session as string | null) ?? null
+      write = readHolder === null ? write.is('claimed_by', null) : write.eq('claimed_by', readHolder)
+      write = readSession === null ? write.is('claimed_session', null) : write.eq('claimed_session', readSession)
+      if (readHolder !== null && task.heartbeat_at && isClaimStale(String(task.heartbeat_at))) {
+        write = write.lt('heartbeat_at', new Date(Date.now() - CLAIM_LEASE_SECONDS * 1000).toISOString())
+      }
+      const pinned = await write.select(PATCH_RESPONSE_FIELDS).maybeSingle()
+      if (!pinned.error && !pinned.data) {
+        const now = await findTask(actor, params.ref)
+        const taken = now ? closeOverClaim(actor, now as Record<string, unknown>) : null
+        const holder = (now?.claimed_by as string | null) ?? null
+        return fail(
+          'already_claimed',
+          taken
+            ? closeRefusalMessage(taken)
+            : `${params.ref} changed hands while it was being closed${holder ? ` (now held by ${holder})` : ''}. Read it again and retry.`,
+          { claimedBy: holder, heartbeatAt: (now?.heartbeat_at as string | null) ?? null },
+        )
+      }
+      return pinned
+    }
+
     let before: Record<string, unknown> = task
     let labelPatch: Record<string, string[]> | undefined
     let result
+    // A close is written against the claim that was read: a claim landing since
+    // is not closed over. A stale lease must still be stale at the write, so one
+    // revived in the meantime counts as live again. With a labelPatch the close
+    // goes first, pinned, and the label RPC follows it.
+    let closed: Awaited<ReturnType<typeof pinnedClose>> | null = null
+    if (closing) {
+      const outcome = await pinnedClose()
+      if (outcome instanceof Response) return outcome
+      closed = outcome
+    }
     if (body.labelPatch) {
       const atomic = await admin().rpc('patch_task_labels', {
         p_task: task.id,
         p_add: body.labelPatch.add ?? [],
         p_remove: body.labelPatch.remove ?? [],
-        p_patch: JSON.stringify(patch),
+        p_patch: closing ? '{}' : JSON.stringify(patch),
         p_owner: actor.userId,
         p_project: moveTarget,
         p_also_projects: alsoProjectIds,
@@ -363,7 +408,9 @@ export const PATCH = route<{ ref: string }, z.infer<typeof patchBody>>({
       } | null
       if (!atomic.error && !delta) return fail('not_found', `No task ${params.ref}.`)
       if (delta) {
-        before = delta.before
+        // After a close the RPC's own snapshot already holds the closed row;
+        // the events must diff from the task as it was read.
+        before = closing ? task : delta.before
         patch.labels = delta.after.labels
         labelPatch = delta.labelPatch
         if (delta.moved) moved = { ref: delta.moved.ref, from }
@@ -374,12 +421,8 @@ export const PATCH = route<{ ref: string }, z.infer<typeof patchBody>>({
         .eq('id', task.id)
         .single()
     } else {
-      result = await admin()
-        .from('tasks')
-        .update(patch)
-        .eq('id', task.id)
-        .select(PATCH_RESPONSE_FIELDS)
-        .single()
+      result = closing ? closed! : await admin().from('tasks').update(patch).eq('id', task.id)
+        .select(PATCH_RESPONSE_FIELDS).single()
     }
     const { data, error } = result
 
@@ -419,6 +462,22 @@ export const PATCH = route<{ ref: string }, z.infer<typeof patchBody>>({
       reassigned.data.to_name = people.get(String(reassigned.data.to))?.name ?? null
     }
     await recordActivity(events, actor.userId, actor.host)
+
+    if (foreign && body.overrideClaim) {
+      const text = overrideNote(actor.actorId, foreign)
+      await admin().from('task_notes').upsert(
+        {
+          task_id: task.id,
+          actor_type: actor.actorType,
+          actor_id: actor.actorId,
+          note: text,
+          kind: 'note',
+          facts: null,
+          content_hash: createHash('sha256').update(`note\n${text}`, 'utf8').digest('hex').slice(0, 32),
+        },
+        { onConflict: 'task_id,content_hash', ignoreDuplicates: true },
+      )
+    }
 
     // The withdrawn answer, kept where history can still show it.
     if (reopening && task.resolution) {

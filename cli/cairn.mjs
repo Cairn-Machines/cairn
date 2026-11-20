@@ -1220,7 +1220,7 @@ const KNOWN_FLAGS = new Set([
   'json', 'key', 'kind', 'kinds', 'label', 'learned', 'limit', 'link', 'maintenance', 'max-parents',
   'message', 'mine', 'name', 'next', 'no-checkpoint', 'no-herdr', 'no-hooks', 'no-jobs', 'no-parent',
   'no-skill', 'no-start', 'notify', 'older',
-  'orphans', 'output', 'owner', 'parent', 'platform', 'position', 'pretty', 'priority', 'project',
+  'orphans', 'output', 'override-claim', 'owner', 'parent', 'platform', 'position', 'pretty', 'priority', 'project',
   'reason', 'related', 'remote', 'repo', 'request', 'resolution', 'run', 'run-url', 'runner', 'runtimes', 'scheduled', 'scope', 'seat',
   'session', 'show-toplevel', 'slug', 'stage', 'start', 'started', 'state', 'status', 'subject', 'summary',
   'superseded', 'superseded-by', 'sweep', 'tag', 'task', 'tasks', 'title', 'to', 'tool-calls',
@@ -3409,6 +3409,8 @@ const HELP = `cairn — agent-first task tracker and shared memory
     cairn done <ref> --resolution "<what was actually done>" [--kind fixed|verified|answered|…]
     cairn cancel <ref> --resolution "<why it is being dropped>" [--kind wont-fix]
     cairn done <ref> --duplicate-of CAI-31 --resolution "…"   points at the original
+    cairn done|cancel <ref> --resolution "…" --override-claim   close over another holder's
+                                   live claim (refused with 409 without it); logs a note naming both
     cairn attach <ref> <file>      |   cairn files <ref>   |   cairn detach <ref> <file-id>
     cairn unnote <ref> <note-id>   withdraw a log line you wrote (a person may remove any)
 
@@ -3649,6 +3651,7 @@ const closeTask = async (status, defaultKind) => {
     body.duplicateOf = flags['duplicate-of']
     body.resolutionKind = 'duplicate'
   }
+  if (flags['override-claim']) body.overrideClaim = true
   const closed = await request('PATCH', `/api/v1/tasks/${ref}`, body)
   emit(named(closed))
   if (FORMAT !== 'tsv' || status !== 'done') return

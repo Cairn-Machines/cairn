@@ -190,6 +190,11 @@ TSV by default (`#count`, a header, rows); `--json` to parse, `--pretty` for a h
 `cairn --help` is the reference. `task delete <ref> --confirm <ref>` is for junk only;
 `cancel` keeps the record and the reason.
 
+`done` and `cancel` refuse (409 `already_claimed`) a task another holder's live claim covers
+(a different actor, or another session of yours); the task stays untouched. If you really are
+closing someone else's work, add `--override-claim`: it closes and logs a note naming both. A
+claim silent for over 15 minutes is not live and needs no flag.
+
 Requires `cairn` on PATH and a key per runtime (`~/.cairn/env`; a person pairs them with
 `cairn setup`): the key is who wrote a thing.
 **Exit 10: several Cairn instances, none known here.** Ask the user which, run the `cairn
