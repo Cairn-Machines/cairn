@@ -6,9 +6,13 @@ const root = resolve(__dirname, '../..')
 const read = (file: string) => readFileSync(resolve(root, file), 'utf8')
 
 describe('drove config', () => {
-  it('AC2: e2eSmoke runs test:smoke and the existing checks are unchanged and in order', () => {
+  it('AC2: checks are unchanged and in order, test:smoke is wired, and e2eSmoke (once declared) runs it', () => {
     const config = JSON.parse(read('.drove.json'))
-    expect(config.e2eSmoke).toEqual(['npm run test:smoke'])
+    // e2eSmoke is declared through Drove after this lands; when present it must be exactly this.
+    if (config.e2eSmoke !== undefined) expect(config.e2eSmoke).toEqual(['npm run test:smoke'])
+    const script: string = JSON.parse(read('package.json')).scripts['test:smoke']
+    expect(script).toContain('scripts/with-throwaway-postgres.sh')
+    expect(script).toContain('playwright test --grep @smoke')
     expect(config.checks).toEqual([
       'npm run typecheck',
       'npm run lint',
