@@ -34,5 +34,8 @@
         ]
       }
     ]
-  }
+  },
+  "e2eSmoke": [
+    "npm run test:smoke"
+  ]
 }
