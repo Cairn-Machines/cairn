@@ -18,6 +18,9 @@
     "npm run build",
     "npm run test:integration:local"
   ],
+  "e2eSmoke": [
+    "npm run test:smoke"
+  ],
   "release": {
     "versionFiles": [
       {

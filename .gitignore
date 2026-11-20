@@ -47,5 +47,9 @@ coverage/
 .idea/
 tsconfig.tsbuildinfo
 
+# playwright
+test-results/
+playwright-report/
+
 # mcp facade
 mcp/node_modules/

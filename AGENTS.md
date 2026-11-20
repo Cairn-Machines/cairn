@@ -91,6 +91,21 @@ Cairn holds **open loops, durable answers, and what was learned getting to them*
 It is not a transcript: it records what a session concluded, never what was said turn by
 turn. "What did we decide and why" is a Cairn question; "what did I type at 11:04" is not.
 
+## Browser smoke set
+
+`npm run test:smoke` runs a short headless Chromium Playwright set (`e2e/*.smoke.spec.ts`,
+tagged `@smoke`): `/login` and the signed-in home at 1440 and 390 wide, asserting real
+content and no console errors. It takes about a minute.
+
+- **Prerequisites:** Docker running (it starts a throwaway `postgres:16` through
+  `scripts/with-throwaway-postgres.sh` and removes it on exit) and Chromium installed once
+  with `npx playwright install chromium`.
+- **It starts the app itself** (`playwright.config.ts` webServer: `next start`, after
+  `npm run build` if there is no `.next` build) with a throwaway operator, fixed test-only
+  credentials and no real account or paid API.
+- **Local only:** the Drove merge gate runs it through `.drove.json` `e2eSmoke`. It never
+  runs in GitHub CI; do not add it to `.github/`.
+
 ## Setup
 
 ```bash
