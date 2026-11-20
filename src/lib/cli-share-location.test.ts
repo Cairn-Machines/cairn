@@ -184,12 +184,12 @@ describe('CAIRN_SHARE_LOCATION', () => {
     const seen = await run(w, ['map', 'CAIRN', '--dir', w.checkout], OFF)
     expect(to(seen, '/repos')).toEqual([])
     expect(JSON.stringify(seen)).not.toContain(ORIGIN)
-    const map = JSON.parse(await readFile(join(w.home, '.cairn', 'projects.json'), 'utf8'))
+    const map = JSON.parse(await readFile(join(w.home, '.cairn', 'state', 'default', 'projects.json'), 'utf8'))
     expect(map[w.checkout]).toBe('CAIRN')
     await rm(w.seenFile, { force: true })
     const none = await run(w, ['map', 'none', '--dir', w.checkout], OFF)
     expect(to(none, '/repos').concat(none.filter((s) => s.method === 'DELETE'))).toEqual([])
-    expect(JSON.parse(await readFile(join(w.home, '.cairn', 'projects.json'), 'utf8'))[w.checkout]).toBeUndefined()
+    expect(JSON.parse(await readFile(join(w.home, '.cairn', 'state', 'default', 'projects.json'), 'utf8'))[w.checkout]).toBeUndefined()
   })
 
   it('AC10: spawned with the switch off, only paths under the git toplevel are kept, relative, and none when there is no toplevel', async () => {
@@ -239,7 +239,7 @@ describe('CAIRN_SHARE_LOCATION', () => {
     const w = await world()
     const seen = await run(w, ['note', 'CAIRN-1', 'hello'], OFF)
     expect(JSON.stringify(seen)).not.toContain(w.checkout)
-    const acted = await readFile(join(w.home, '.cairn', 'acted.jsonl'), 'utf8').catch(() => '')
+    const acted = await readFile(join(w.home, '.cairn', 'state', 'default', 'acted.jsonl'), 'utf8').catch(() => '')
     expect(acted).toContain(w.checkout)
   })
 

@@ -93,6 +93,22 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
 describe('the session-end hook', () => {
+  it('reads the acted log from every state directory, the old location and CAIRN_STATE_DIR (CAIRN-454)', async () => {
+    const row = (ref: string) => `${JSON.stringify({ t: '2026-09-25T09:02:00.000Z', ref, session: 'sess-acted', cwd: '/work/demo' })}\n`
+    const write = (path: string, ref: string) => {
+      mkdirSync(join(path, '..'), { recursive: true })
+      writeFileSync(path, row(ref))
+    }
+    write(join(dir, '.cairn', 'state', 'work', 'acted.jsonl'), 'WORK-1')
+    write(join(dir, '.cairn', 'state', 'default', 'acted.jsonl'), 'MAIN-2')
+    write(join(dir, '.cairn', 'acted.jsonl'), 'OLD-3')
+    write(join(dir, 'elsewhere', 'acted.jsonl'), 'ENV-4')
+    const path = transcript('acted', [user('Please fix the login redirect'), edit('/work/demo/auth.ts')])
+    await run({ transcript_path: path, session_id: 'sess-acted', cwd: '/work/demo' }, { CAIRN_STATE_DIR: join(dir, 'elsewhere') })
+    const [args] = lines('cli.jsonl')
+    expect(argValue(args, '--tasks')?.split(',').sort()).toEqual(['ENV-4', 'MAIN-2', 'OLD-3', 'WORK-1'])
+  })
+
   it('never records a summariser run', async () => {
     const path = transcript('child', [
       user(`${SUMMARISER_PROMPT}\n\nReturn ONLY a JSON object…\n\n---\n\n# What was asked\nwork on CAIRN-12`),

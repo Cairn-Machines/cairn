@@ -15,9 +15,11 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import {
+  accessSync,
   appendFileSync,
   closeSync,
   chmodSync,
+  constants as fsConstants,
   existsSync,
   mkdirSync,
   openSync,
@@ -36,6 +38,56 @@ import { createInterface } from 'node:readline/promises'
 import { homedir, hostname } from 'node:os'
 
 const CAIRN_DIR = join(homedir(), '.cairn')
+
+/**
+ * Mutable state — the outbox and its siblings, the acted log, the caches —
+ * lives apart from credentials, so an agent sandboxed to write only this
+ * directory can still queue a write while the server is down, and nothing it
+ * writes sits beside an `env` file.
+ *
+ *   ~/.cairn/state/<instance>/   (~/.cairn/state/default/ with no named instance)
+ *
+ * CAIRN_STATE_DIR replaces that directory and must be an absolute path.
+ * `ownership` stays where it always was, and `env` is never read from or
+ * written here. Older CLIs kept all of it beside the credentials, so reads fall
+ * back to that location (legacyDirFor) and the old outbox is migrated.
+ */
+const STATE_ROOT = join(CAIRN_DIR, 'state')
+const STATE_OVERRIDE = (process.env.CAIRN_STATE_DIR ?? '').trim()
+const STATE_OVERRIDE_ERROR = STATE_OVERRIDE && !isAbsolute(STATE_OVERRIDE)
+  ? `cairn: CAIRN_STATE_DIR must be an absolute path (got "${STATE_OVERRIDE}"). ` +
+    'Unset it to use ~/.cairn/state/<instance>, or give the full path.'
+  : null
+/**
+ * A cache another instance's routing reads is `<root>/<instance>/<file>`, root
+ * being ~/.cairn/state or CAIRN_STATE_DIR: the process's own queue state is the
+ * state directory itself, but routing asks about instances it is not.
+ */
+const cachePathFor = (name, file) => join(STATE_OVERRIDE && !STATE_OVERRIDE_ERROR ? resolve(STATE_OVERRIDE) : STATE_ROOT, name ?? 'default', file)
+const legacyDirForName = (name) => (name ? join(CAIRN_DIR, 'instances', name) : CAIRN_DIR)
+
+/** A cache from the state directory, else the file older CLIs left beside the credentials. */
+const readCacheText = (name, file) => {
+  try {
+    return readFileSync(cachePathFor(name, file), 'utf8')
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+  }
+  return readFileSync(join(legacyDirForName(name), file), 'utf8')
+}
+
+/** mtime of whichever copy a read would use. */
+const cacheMtimeMs = (name, file) => {
+  try {
+    return statSync(cachePathFor(name, file)).mtimeMs
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+  }
+  return statSync(join(legacyDirForName(name), file)).mtimeMs
+}
+
+/** Creates a state directory and any parent with mode 0700; one that exists is left as it is. */
+const ensureDir = (dir) => mkdirSync(dir, { recursive: true, mode: 0o700 })
 
 /**
  * Credentials come from the environment, falling back to ~/.cairn/env — so an
@@ -80,9 +132,10 @@ const VERSION = '0.25.7'
  * ask, the command stops before any request with exit 10, which tells an agent
  * to ask the user rather than try again.
  *
- * Every instance keeps its own state in ~/.cairn/instances/<name>/ — env,
- * outbox, ownership, projects.json — because a ref or a directory mapped on
- * one means nothing on the other. No instances.json is the single-instance
+ * Every instance keeps its own state — env and ownership in
+ * ~/.cairn/instances/<name>/, the outbox, projects.json and caches in
+ * ~/.cairn/state/<name>/ — because a ref or a directory mapped on one means
+ * nothing on the other. No instances.json is the single-instance
  * machine this CLI has always served, and nothing about it changes.
  */
 const INSTANCES_PATH = join(CAIRN_DIR, 'instances.json')
@@ -265,7 +318,7 @@ const PROJECT_KEYS_TTL_MS = 6 * 60 * 60 * 1000
 const instancesWithKey = (key, instances) =>
   Object.keys(instances).filter((name) => {
     try {
-      return JSON.parse(readFileSync(join(instanceDir(name), PROJECT_KEYS_FILE), 'utf8')).keys?.includes(key)
+      return JSON.parse(readCacheText(name, PROJECT_KEYS_FILE)).keys?.includes(key)
     } catch {
       return false
     }
@@ -279,12 +332,11 @@ const instancesWithKey = (key, instances) =>
  * could not parse, has told us nothing about what it owns.
  */
 const isStaleInstance = (name) => {
-  const path = join(instanceDir(name), PROJECT_KEYS_FILE)
   try {
-    const cached = JSON.parse(readFileSync(path, 'utf8'))
+    const cached = JSON.parse(readCacheText(name, PROJECT_KEYS_FILE))
     if (!Array.isArray(cached.keys)) return true
     const at = Date.parse(cached.at ?? '')
-    const age = Number.isFinite(at) ? Date.now() - at : Date.now() - statSync(path).mtimeMs
+    const age = Number.isFinite(at) ? Date.now() - at : Date.now() - cacheMtimeMs(name, PROJECT_KEYS_FILE)
     return age >= PROJECT_KEYS_TTL_MS
   } catch {
     return true
@@ -305,7 +357,7 @@ const isStaleInstance = (name) => {
  */
 const neverReachedInstance = (name) => {
   try {
-    const cached = JSON.parse(readFileSync(join(instanceDir(name), PROJECT_KEYS_FILE), 'utf8'))
+    const cached = JSON.parse(readCacheText(name, PROJECT_KEYS_FILE))
     return !Array.isArray(cached.keys)
   } catch {
     return true
@@ -408,9 +460,8 @@ const refreshInstanceKeysFor = async (name, instances) => {
     // Active projects only, same as refreshProjectKeys: an archived project's
     // copy must not keep claiming a ref that has moved on.
     const keys = [...new Set(payload.data.flatMap((p) => [p.key, ...(p.former_keys ?? []).map((f) => f.key)]).filter(Boolean))]
-    const dir = instanceDir(name)
-    mkdirSync(dir, { recursive: true, mode: 0o700 })
-    const path = join(dir, PROJECT_KEYS_FILE)
+    const path = cachePathFor(name, PROJECT_KEYS_FILE)
+    ensureDir(dirname(path))
     writeFileSync(`${path}.tmp`, `${JSON.stringify({ at: new Date().toISOString(), keys })}\n`, { mode: 0o600 })
     renameSync(`${path}.tmp`, path)
     return true
@@ -752,7 +803,17 @@ const INSTANCE = await selectInstance()
 /** Where this instance's files live, for messages: never a path with a username in it. */
 const STATE_LABEL = INSTANCE.name ? `~/.cairn/instances/${INSTANCE.name}` : '~/.cairn'
 const ENV_LABEL = `${STATE_LABEL}/env`
+/** Beside the credentials: where `ownership` lives, and where older CLIs kept everything else. */
 const STATE_DIR = INSTANCE.dir ?? CAIRN_DIR
+/** Where this process keeps its mutable state: see STATE_ROOT. */
+const MUTABLE_DIR = STATE_OVERRIDE && !STATE_OVERRIDE_ERROR
+  ? resolve(STATE_OVERRIDE)
+  : join(STATE_ROOT, INSTANCE.name ?? 'default')
+const ensureStateDir = () => ensureDir(MUTABLE_DIR)
+if (STATE_OVERRIDE_ERROR && !JUST_HELP && EARLY_COMMAND !== 'version' && !process.argv.includes('--version')) {
+  process.stderr.write(`${STATE_OVERRIDE_ERROR}\n`)
+  process.exit(2)
+}
 
 const FILE_ENV = fileEnv(INSTANCE.dir && join(INSTANCE.dir, 'env'))
 /**
@@ -1492,7 +1553,7 @@ let FLUSHING = false
  * it may not have won, is worse off than one told plainly that the write
  * failed. Those fail fast instead.
  */
-const OUTBOX_PATH = join(STATE_DIR, 'outbox.jsonl')
+const OUTBOX_PATH = join(MUTABLE_DIR, 'outbox.jsonl')
 const REJECTED_OUTBOX_PATH = `${OUTBOX_PATH}.rejected`
 const OUTBOX_LOCK_PATH = `${OUTBOX_PATH}.lock`
 const OUTBOX_REPLAY_LOCK_PATH = `${OUTBOX_PATH}.replay.lock`
@@ -1507,19 +1568,18 @@ const TEST_ENQUEUE_DURING_REPLAY = process.env.CAIRN_TEST_ENQUEUE_DURING_REPLAY 
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-/** Put a write aside so the agent can carry on, and say so plainly. */
-const withOutboxLock = async (run) => {
-  mkdirSync(dirname(OUTBOX_PATH), { recursive: true })
+/** One lock file, taken by exclusive creation; a lock older than the stale window is taken over. */
+const withLockFile = async (lockPath, run) => {
   const deadline = Date.now() + Math.max(DEADLINE_MS, 5_000)
   let handle
   while (handle === undefined) {
     try {
-      handle = openSync(OUTBOX_LOCK_PATH, 'wx', 0o600)
+      handle = openSync(lockPath, 'wx', 0o600)
     } catch (error) {
       if (error?.code !== 'EEXIST') throw error
       try {
-        if (Date.now() - statSync(OUTBOX_LOCK_PATH).mtimeMs > Math.max(DEADLINE_MS * 4, 60_000)) {
-          unlinkSync(OUTBOX_LOCK_PATH)
+        if (Date.now() - statSync(lockPath).mtimeMs > Math.max(DEADLINE_MS * 4, 60_000)) {
+          unlinkSync(lockPath)
           continue
         }
       } catch {
@@ -1533,8 +1593,14 @@ const withOutboxLock = async (run) => {
     return await run()
   } finally {
     closeSync(handle)
-    try { unlinkSync(OUTBOX_LOCK_PATH) } catch { /* stale recovery may already have removed it */ }
+    try { unlinkSync(lockPath) } catch { /* stale recovery may already have removed it */ }
   }
+}
+
+/** Put a write aside so the agent can carry on, and say so plainly. */
+const withOutboxLock = async (run) => {
+  ensureStateDir()
+  return withLockFile(OUTBOX_LOCK_PATH, run)
 }
 
 /** PID alone is reusable; include the OS process incarnation in a replay lease. */
@@ -1569,7 +1635,7 @@ const isUnrelatedToCairn = (pid) => {
 
 /** One worker drains the shared queue at a time, including its network sends. */
 const withReplayLock = async (run) => {
-  mkdirSync(dirname(OUTBOX_PATH), { recursive: true })
+  ensureStateDir()
   const deadline = Date.now() + Math.max(DEADLINE_MS * 2, 5_000)
   const owner = JSON.stringify({ pid: process.pid, start: processStartIdentity(process.pid), token: randomUUID() })
   let handle
@@ -1629,9 +1695,236 @@ const withReplayLock = async (run) => {
   }
 }
 
+/**
+ * What older CLIs left in the old outbox directory (beside the credentials).
+ *
+ * Taken into the state directory's queue the next time anything drains or
+ * queues, and again whenever an old CLI appends there afterwards:
+ *
+ * - Exactly once. Each file is claimed by an atomic rename inside the old
+ *   directory, so of two CLIs migrating at once the loser sees ENOENT and moves
+ *   on; the old CLI's own lock is held meanwhile so an append cannot land in a
+ *   file being taken. An entry's id is the dedupe key against what a
+ *   read-only pass already took, and the server's Idempotency-Key (the same id)
+ *   covers a crash between writing the queue file and removing the old one.
+ * - When the old directory cannot be changed (EPERM/EACCES, or a rename that
+ *   cannot cross a filesystem), entries are copied and the old files are never
+ *   touched; the ids taken are recorded in `outbox.legacy-seen` in the state
+ *   directory, so the next pass does not copy them again.
+ * - A `processing-*` file whose owner is alive stays. Ack markers move with
+ *   the queue files. Locks are never copied, and the legacy `.rejected` stays
+ *   where it is as read-only history: new rejections go to the state directory.
+ */
+const LEGACY_OUTBOX_DIR = STATE_DIR
+const LEGACY_OUTBOX_LOCK_PATH = join(LEGACY_OUTBOX_DIR, 'outbox.jsonl.lock')
+const LEGACY_SEEN_PATH = join(MUTABLE_DIR, 'outbox.legacy-seen')
+const LEGACY_SEEN_MAX_BYTES = 1024 * 1024
+const LEGACY_SEEN_KEEP_LINES = 10_000
+const LEGACY_MIGRATION = LEGACY_OUTBOX_DIR !== MUTABLE_DIR
+
+const legacyOwnerIsDead = (name, marker) => {
+  const pid = Number(new RegExp(`^outbox\\.jsonl\\.${marker}-(\\d+)-`).exec(name)?.[1])
+  if (!Number.isSafeInteger(pid) || pid === process.pid) return false
+  try {
+    process.kill(pid, 0)
+    return false
+  } catch (error) {
+    return error?.code === 'ESRCH'
+  }
+}
+
+/** Queue files and ack markers in the old directory that this process may take. */
+const legacyOutboxFiles = () => {
+  if (!LEGACY_MIGRATION) return []
+  let names
+  try { names = readdirSync(LEGACY_OUTBOX_DIR) } catch { return [] }
+  const files = []
+  for (const name of names) {
+    const path = join(LEGACY_OUTBOX_DIR, name)
+    try {
+      if (name === 'outbox.jsonl' || name.startsWith(`${OUTBOX_PREFIX}pending-`)) {
+        if (!name.endsWith('.tmp') && statSync(path).size > 0) files.push({ name, path, kind: 'queue' })
+      } else if (
+        (name.startsWith(`${OUTBOX_PREFIX}processing-`) || name.startsWith(`${OUTBOX_PREFIX}migrating-`)) &&
+        !name.endsWith('.tmp') && !name.endsWith('.ack')
+      ) {
+        const marker = name.startsWith(`${OUTBOX_PREFIX}processing-`) ? 'processing' : 'migrating'
+        if (legacyOwnerIsDead(name, marker) || Date.now() - statSync(path).mtimeMs > Math.max(DEADLINE_MS * 4, 60_000)) {
+          files.push({ name, path, kind: 'queue' })
+        }
+      } else if (name.startsWith(`${OUTBOX_PREFIX}ack-`) && name.endsWith('.json')) {
+        files.push({ name, path, kind: 'ack' })
+      }
+    } catch { /* gone since the listing */ }
+  }
+  return files
+}
+
+const readLegacySeen = () => {
+  const seen = new Set()
+  let text = ''
+  try { text = readFileSync(LEGACY_SEEN_PATH, 'utf8') } catch { return seen }
+  for (const line of text.split('\n')) {
+    try { const key = JSON.parse(line)?.k; if (typeof key === 'string') seen.add(key) } catch { /* torn line */ }
+  }
+  return seen
+}
+
+const rememberLegacySeen = (keys) => {
+  if (!keys.length) return
+  const at = new Date().toISOString()
+  appendFileSync(LEGACY_SEEN_PATH, keys.map((k) => `${JSON.stringify({ k, at })}\n`).join(''), { mode: 0o600 })
+  try {
+    if (statSync(LEGACY_SEEN_PATH).size > LEGACY_SEEN_MAX_BYTES) {
+      const kept = readFileSync(LEGACY_SEEN_PATH, 'utf8').split('\n').filter(Boolean).slice(-LEGACY_SEEN_KEEP_LINES)
+      const temp = `${LEGACY_SEEN_PATH}.tmp`
+      writeFileSync(temp, `${kept.join('\n')}\n`, { mode: 0o600 })
+      renameSync(temp, LEGACY_SEEN_PATH)
+    }
+  } catch { /* an oversize record is only a cost */ }
+}
+
+const legacyLineKey = (line) => {
+  try {
+    const id = JSON.parse(line)?.id
+    if (typeof id === 'string' && id) return id
+  } catch { /* no id to dedupe on */ }
+  return `line:${createHash('sha256').update(line).digest('hex').slice(0, 32)}`
+}
+
+/** A line still being appended has no newline yet; only a file this process holds exclusively is read to its end. */
+const legacyLines = (text, includeFragment) => {
+  const parts = text.split('\n')
+  const tail = parts.pop()
+  if (includeFragment && tail) parts.push(tail)
+  return parts.filter(Boolean)
+}
+
+const writeStateFile = (name, text) => {
+  const temp = join(MUTABLE_DIR, `outbox.migrate-${randomUUID()}.tmp`)
+  writeFileSync(temp, text, { mode: 0o600 })
+  renameSync(temp, join(MUTABLE_DIR, name))
+}
+
+/** The old CLI's own lock, so an append is not lost into a file being taken. */
+const takeLegacyLock = () => {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return { mode: 'held', handle: openSync(LEGACY_OUTBOX_LOCK_PATH, 'wx', 0o600) }
+    } catch (error) {
+      if (error?.code !== 'EEXIST') return { mode: 'readonly' }
+      try { accessSync(LEGACY_OUTBOX_DIR, fsConstants.W_OK) } catch { return { mode: 'readonly' } }
+      try {
+        if (Date.now() - statSync(LEGACY_OUTBOX_LOCK_PATH).mtimeMs > Math.max(DEADLINE_MS * 4, 60_000)) {
+          unlinkSync(LEGACY_OUTBOX_LOCK_PATH)
+          continue
+        }
+      } catch { return { mode: 'readonly' } }
+      return { mode: 'busy' }
+    }
+  }
+  return { mode: 'busy' }
+}
+
+const takeLegacyFile = (file, seen, canMove) => {
+  if (file.kind === 'ack') {
+    if (canMove) {
+      try {
+        renameSync(file.path, join(MUTABLE_DIR, file.name))
+        return 1
+      } catch (error) {
+        if (error?.code === 'ENOENT') return 0
+      }
+    }
+    const key = `ack:${file.name}`
+    if (seen.has(key)) return 0
+    writeStateFile(file.name, readFileSync(file.path, 'utf8'))
+    rememberLegacySeen([key])
+    seen.add(key)
+    return 1
+  }
+  let claimed = null
+  if (canMove) {
+    const to = join(LEGACY_OUTBOX_DIR, `${OUTBOX_PREFIX}migrating-${process.pid}-${randomUUID()}`)
+    try {
+      renameSync(file.path, to)
+      claimed = to
+    } catch (error) {
+      if (error?.code === 'ENOENT') return 0 // another CLI took it
+    }
+  }
+  const restore = () => {
+    if (!claimed) return
+    try { renameSync(claimed, join(LEGACY_OUTBOX_DIR, `${OUTBOX_PREFIX}pending-${randomUUID()}`)) } catch { /* its owner's pid is dead by the next pass */ }
+  }
+  let text
+  try {
+    text = readFileSync(claimed ?? file.path, 'utf8')
+  } catch (error) {
+    restore()
+    throw error
+  }
+  const fresh = legacyLines(text, Boolean(claimed)).filter((line) => !seen.has(legacyLineKey(line)))
+  try {
+    if (fresh.length) writeStateFile(`${OUTBOX_PREFIX}pending-${randomUUID()}`, `${fresh.join('\n')}\n`)
+  } catch (error) {
+    restore()
+    throw error
+  }
+  const keys = fresh.map(legacyLineKey)
+  if (claimed) {
+    try { unlinkSync(claimed) } catch { rememberLegacySeen(keys) }
+  } else {
+    rememberLegacySeen(keys)
+  }
+  for (const key of keys) seen.add(key)
+  return fresh.length
+}
+
+/** Under the outbox lock. Never fails the caller: what could not be taken is tried again next time. */
+const migrateLegacyOutbox = () => {
+  try {
+    const files = legacyOutboxFiles()
+    if (!files.length) return 0
+    const seen = readLegacySeen()
+    const lock = takeLegacyLock()
+    if (lock.mode === 'busy') return 0
+    let taken = 0
+    try {
+      for (const file of files) {
+        try { taken += takeLegacyFile(file, seen, lock.mode === 'held') } catch { /* retried on the next pass */ }
+      }
+    } finally {
+      if (lock.mode === 'held') {
+        closeSync(lock.handle)
+        try { unlinkSync(LEGACY_OUTBOX_LOCK_PATH) } catch { /* already recovered */ }
+      }
+    }
+    return taken
+  } catch {
+    return 0
+  }
+}
+
+/** Whether the old directory holds an entry or marker this process has not taken yet. */
+const legacyHasReplayable = () => {
+  const files = legacyOutboxFiles()
+  if (!files.length) return false
+  const seen = readLegacySeen()
+  return files.some((file) => {
+    if (file.kind === 'ack') return !seen.has(`ack:${file.name}`)
+    try {
+      return legacyLines(readFileSync(file.path, 'utf8'), false).some((line) => !seen.has(legacyLineKey(line)))
+    } catch {
+      return false
+    }
+  })
+}
+
 const enqueue = async (method, path, body, why) => {
   try {
     await withOutboxLock(() => {
+      migrateLegacyOutbox()
       if (path.split('?')[0].endsWith('/checkpoint')) {
         const state = rememberedTaskState(path)
         if (state) body = {
@@ -1717,6 +2010,9 @@ const holdsReplayable = (path) => {
 
 const hasReplayableOutbox = () => {
   try {
+    if (legacyHasReplayable()) return true
+  } catch { /* an unreadable old directory is not a queue */ }
+  try {
     const dir = dirname(OUTBOX_PATH)
     return readdirSync(dir).some((name) =>
       ((name === basename(OUTBOX_PATH) || name.startsWith(`${OUTBOX_PREFIX}pending-`)) &&
@@ -1747,6 +2043,7 @@ const flushOutbox = async () => withReplayLock(async () => {
   try {
     claimed = await withOutboxLock(() => {
       const dir = dirname(OUTBOX_PATH)
+      migrateLegacyOutbox()
       // Recover acknowledgements journaled before a crash between processing
       // file compaction and local ownership persistence.
       for (const name of readdirSync(dir)) {
@@ -1956,9 +2253,9 @@ let mutated = false
 let refreshingKeys = false
 const refreshProjectKeys = async (force) => {
   if (!INSTANCE.name || refreshingKeys) return
-  const path = join(STATE_DIR, PROJECT_KEYS_FILE)
+  const path = cachePathFor(INSTANCE.name, PROJECT_KEYS_FILE)
   try {
-    if (!force && Date.now() - statSync(path).mtimeMs < PROJECT_KEYS_TTL_MS) return
+    if (!force && Date.now() - cacheMtimeMs(INSTANCE.name, PROJECT_KEYS_FILE) < PROJECT_KEYS_TTL_MS) return
   } catch { /* never fetched */ }
   refreshingKeys = true
   try {
@@ -1974,7 +2271,7 @@ const refreshProjectKeys = async (force) => {
     const payload = await res.json()
     if (!payload?.success || !Array.isArray(payload.data)) return
     const keys = [...new Set(payload.data.flatMap((p) => [p.key, ...(p.former_keys ?? []).map((f) => f.key)]).filter(Boolean))]
-    mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 })
+    ensureDir(dirname(path))
     writeFileSync(`${path}.tmp`, `${JSON.stringify({ at: new Date().toISOString(), keys })}\n`, { mode: 0o600 })
     renameSync(`${path}.tmp`, path)
   } catch {
@@ -2266,11 +2563,12 @@ const emit = (data, opts = {}) => {
  * Which Cairn project a directory belongs to.
  *
  * The server can guess from sessions already recorded against a cwd, but only
- * after the first one. This is the explicit answer, kept next to the
- * credentials: a longest-prefix map in ~/.cairn/projects.json, so a monorepo
+ * after the first one. This is the explicit answer, kept in the state
+ * directory: a longest-prefix map in projects.json, so a monorepo
  * subdirectory can override its parent.
  */
-const PROJECT_MAP_PATH = join(STATE_DIR, 'projects.json')
+const PROJECT_MAP_PATH = join(MUTABLE_DIR, 'projects.json')
+const LEGACY_PROJECT_MAP_PATH = join(STATE_DIR, 'projects.json')
 const OWNERSHIP_DIR = join(STATE_DIR, 'ownership')
 
 const ownershipPath = (ref) => join(OWNERSHIP_DIR, `${ref.toUpperCase().replace(/[^A-Z0-9-]/g, '_')}.json`)
@@ -2371,7 +2669,7 @@ const updateRememberedOwnership = (path, data) => {
  * filters on it exactly. A runtime that cannot name itself writes no session
  * and keeps the old behaviour; nothing is lost that was previously correct.
  */
-const ACTED_PATH = join(CAIRN_DIR, 'acted.jsonl')
+const ACTED_PATH = join(MUTABLE_DIR, 'acted.jsonl')
 const ACTED_MAX_BYTES = 256 * 1024
 const ACTED_KEEP_LINES = 2000
 
@@ -2402,10 +2700,10 @@ const rememberWrite = (method, path, data) => {
   const ref = refOfWrite(path, data)
   if (!ref) return
   try {
-    mkdirSync(dirname(ACTED_PATH), { recursive: true })
+    ensureStateDir()
     if (existsSync(ACTED_PATH) && statSync(ACTED_PATH).size > ACTED_MAX_BYTES) {
       const kept = readFileSync(ACTED_PATH, 'utf8').trim().split('\n').slice(-ACTED_KEEP_LINES)
-      writeFileSync(ACTED_PATH, `${kept.join('\n')}\n`)
+      writeFileSync(ACTED_PATH, `${kept.join('\n')}\n`, { mode: 0o600 })
     }
     appendFileSync(
       ACTED_PATH,
@@ -2422,6 +2720,7 @@ const rememberWrite = (method, path, data) => {
         // absent as "cannot tell", never as "not mine".
         ...(SESSION ? { session: SESSION } : {}),
       })}\n`,
+      { mode: 0o600 },
     )
   } catch {
     // A breadcrumb is a convenience for the hook. Never fail a write over one.
@@ -2567,7 +2866,14 @@ const warnRetiredMappings = async (map) => {
 
 const readProjectMap = () => {
   try {
-    return JSON.parse(readFileSync(PROJECT_MAP_PATH, 'utf8'))
+    let text
+    try {
+      text = readFileSync(PROJECT_MAP_PATH, 'utf8')
+    } catch (error) {
+      if (error?.code !== 'ENOENT' || LEGACY_PROJECT_MAP_PATH === PROJECT_MAP_PATH) throw error
+      text = readFileSync(LEGACY_PROJECT_MAP_PATH, 'utf8')
+    }
+    return JSON.parse(text)
   } catch {
     return {}
   }
@@ -3429,10 +3735,18 @@ const addInstance = async ({ name, url, makeDefault = false, adopt = false, uncl
 
   const dir = instanceDir(name)
   const legacy = ['env', 'projects.json', 'ownership'].filter((f) => existsSync(join(CAIRN_DIR, f)))
-  const queued = existsSync(CAIRN_DIR) && readdirSync(CAIRN_DIR).some((f) =>
+  const isQueueFile = (f) =>
     (f === 'outbox.jsonl' || f.startsWith(OUTBOX_PREFIX)) &&
-    f !== basename(OUTBOX_LOCK_PATH) && f !== basename(OUTBOX_REPLAY_LOCK_PATH))
+    f !== basename(OUTBOX_LOCK_PATH) && f !== basename(OUTBOX_REPLAY_LOCK_PATH)
+  // What a no-instance machine keeps in ~/.cairn/state/default belongs to the
+  // instance that adopts it, same as the files an older CLI left at the top.
+  const defaultStateDir = join(STATE_ROOT, 'default')
+  const STATE_CACHES = ['projects.json', 'lab.json', 'project-keys.json']
+  const isStateFile = (f) => isQueueFile(f) || f === 'outbox.legacy-seen' || STATE_CACHES.includes(f)
+  const defaultStateFiles = STATE_OVERRIDE ? [] : existsSync(defaultStateDir) ? readdirSync(defaultStateDir).filter(isStateFile) : []
+  const queued = (existsSync(CAIRN_DIR) && readdirSync(CAIRN_DIR).some(isQueueFile)) || defaultStateFiles.length > 0
   const moved = []
+  const movedState = []
   if (adopt && (legacy.length || queued)) {
     // The files at the top of ~/.cairn belong to the server they were used
     // with, found the way it always was: the environment, then ~/.cairn/env,
@@ -3462,8 +3776,7 @@ const addInstance = async ({ name, url, makeDefault = false, adopt = false, uncl
     // would replace the queued writes it had already moved.
     await withOutboxLock(() => {
       for (const file of readdirSync(CAIRN_DIR)) {
-        if (file !== 'outbox.jsonl' && !file.startsWith(OUTBOX_PREFIX)) continue
-        if (file === basename(OUTBOX_LOCK_PATH) || file === basename(OUTBOX_REPLAY_LOCK_PATH)) continue
+        if (!isQueueFile(file)) continue
         const from = join(CAIRN_DIR, file)
         const to = join(dir, file)
         if (existsSync(to)) {
@@ -3472,11 +3785,26 @@ const addInstance = async ({ name, url, makeDefault = false, adopt = false, uncl
         } else renameSync(from, to)
         moved.push(file)
       }
+      if (defaultStateFiles.length) {
+        const stateDir = join(STATE_ROOT, name)
+        ensureDir(stateDir)
+        for (const file of defaultStateFiles) {
+          const from = join(defaultStateDir, file)
+          const to = join(stateDir, file)
+          if (!existsSync(to)) renameSync(from, to)
+          else if (!STATE_CACHES.includes(file)) {
+            appendFileSync(to, readFileSync(from), { mode: 0o600 })
+            unlinkSync(from)
+          } else continue
+          movedState.push(file)
+        }
+      }
     })
   }
   writeInstancesConfig(config)
 
   const notes = []
+  if (movedState.length) notes.push(`moved ${movedState.join(', ')} into ~/.cairn/state/${name}/`)
   if (moved.length) notes.push(`moved ${moved.join(', ')} into ~/.cairn/instances/${name}/`)
   else if (legacy.includes('env') && !current && !adopt) {
     notes.push('~/.cairn/env is no longer read now that instances are configured; ' +
@@ -3777,7 +4105,7 @@ const SUBJECT_REF = /^(?:LAB-)?(\d{1,9})$/i
 const SUBJECT_NOTE_KINDS = ['note', 'finding', 'decision', 'attempt', 'handoff']
 const STAGE_CATEGORIES = ['planned', 'active', 'completed', 'dropped']
 const HEX_COLOR = /^#[0-9a-f]{6}$/i
-const LAB_CACHE = join(STATE_DIR, 'lab.json')
+const LAB_CACHE_FILE = 'lab.json'
 
 /**
  * Whether this instance has the Lab on, as the last request that knew it said.
@@ -3791,21 +4119,22 @@ const rememberLab = (enabled) => {
   try {
     let was
     try {
-      was = JSON.parse(readFileSync(LAB_CACHE, 'utf8')).enabled
+      was = JSON.parse(readCacheText(INSTANCE.name, LAB_CACHE_FILE)).enabled
     } catch {
       // nothing recorded yet
     }
     if (was === enabled) return
-    mkdirSync(dirname(LAB_CACHE), { recursive: true, mode: 0o700 })
-    writeFileSync(LAB_CACHE, `${JSON.stringify({ enabled, at: new Date().toISOString() })}\n`)
+    const path = cachePathFor(INSTANCE.name, LAB_CACHE_FILE)
+    ensureDir(dirname(path))
+    writeFileSync(path, `${JSON.stringify({ enabled, at: new Date().toISOString() })}\n`, { mode: 0o600 })
   } catch {
     // A line of help is not worth failing a command over.
   }
 }
 
-const labCachedOn = (dir) => {
+const labCachedOn = (name) => {
   try {
-    return JSON.parse(readFileSync(join(dir, 'lab.json'), 'utf8')).enabled === true
+    return JSON.parse(readCacheText(name, LAB_CACHE_FILE)).enabled === true
   } catch {
     return false
   }
@@ -3813,10 +4142,10 @@ const labCachedOn = (dir) => {
 
 /** Help does not route: with several instances, any of them having the Lab on shows it. */
 const labOnForHelp = () => {
-  if (!INSTANCES || INSTANCES.error) return labCachedOn(CAIRN_DIR)
+  if (!INSTANCES || INSTANCES.error) return labCachedOn(null)
   const asked = earlyFlag('instance') || process.env.CAIRN_INSTANCE?.trim()
   const names = asked ? [asked] : Object.keys(INSTANCES.instances)
-  return names.some((name) => INSTANCE_NAME.test(name) && labCachedOn(instanceDir(name)))
+  return names.some((name) => INSTANCE_NAME.test(name) && labCachedOn(name))
 }
 
 /** `LAB-12`, `lab-12` or `12`, answered as `LAB-12`; anything else is refused with what it looks like. */
@@ -7555,8 +7884,8 @@ const commands = {
       }
     }
 
-    mkdirSync(dirname(PROJECT_MAP_PATH), { recursive: true })
-    writeFileSync(PROJECT_MAP_PATH, `${JSON.stringify(map, null, 2)}\n`)
+    ensureStateDir()
+    writeFileSync(PROJECT_MAP_PATH, `${JSON.stringify(map, null, 2)}\n`, { mode: 0o600 })
     emit({ path: dir, project: map[dir] ?? null, repo, ...(claimed ?? {}) })
   },
 
