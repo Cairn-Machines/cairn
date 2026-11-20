@@ -709,10 +709,15 @@ const TOOLS = [
           type: 'string',
           enum: ['fixed', 'wont-fix', 'duplicate', 'not-reproducible', 'superseded', 'answered'],
         },
+        override_claim: {
+          type: 'boolean',
+          description: 'Close even though another holder has a live claim; a note records who overrode whom. Without it that close is refused.',
+        },
       },
       required: ['ref', 'resolution'],
     },
-    run: (a) => ['done', a.ref, '--resolution', a.resolution, ...(a.kind ? ['--kind', a.kind] : [])],
+    run: (a) => ['done', a.ref, '--resolution', a.resolution, ...(a.kind ? ['--kind', a.kind] : []),
+      ...(a.override_claim ? ['--override-claim'] : [])],
   },
   {
     name: 'cairn_deps',

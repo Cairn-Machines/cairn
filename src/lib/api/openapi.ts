@@ -857,7 +857,12 @@ export const openapiSpec = () => ({
           'copy left behind by a move to another Cairn instance; restore the project first, or ' +
           'point the CLI at the other instance. `subject` links the task as a todo of that subject, ' +
           'or `null` unlinks it. While a hand-off is open, `status`, `resolution` and ' +
-          '`resolutionKind` are refused with 409 `handed_off`; the other fields stay editable.',
+          '`resolutionKind` are refused with 409 `handed_off`; the other fields stay editable. ' +
+          'A close (`done` or `cancelled`) over another holder\'s live claim — a different actor, or ' +
+          'another session of the caller when both name one — is refused with 409 `already_claimed` ' +
+          '(`claimedBy`, `heartbeatAt`) and nothing in the body is applied. `overrideClaim: true` closes ' +
+          'it anyway and writes one note naming the caller and the previous holder. A lease silent for ' +
+          'over 15 minutes is not live and needs no flag.',
         requestBody: body(withTaskSubject(json(updateTaskSchema))),
         responses: {
           '200': okResponse('Updated.', taskSummary),

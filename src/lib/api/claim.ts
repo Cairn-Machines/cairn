@@ -1,7 +1,7 @@
 import { admin, pool } from '@/lib/db/client'
 import type { Actor } from './auth'
 import { actorLabel } from './actor'
-import { CLAIM_LEASE_SECONDS } from '@/lib/utils'
+import { CLAIM_LEASE_SECONDS, isClaimStale } from '@/lib/utils'
 
 /**
  * Taking a task, as one conditional UPDATE.
@@ -27,6 +27,49 @@ export const isAnotherSessionsClaim = (
   holder: string | null | undefined,
   mine: string | null | undefined,
 ): boolean => Boolean(holder && mine && holder !== mine)
+
+export type ForeignClaim = {
+  holder: string
+  session: string | null
+  heartbeatAt: string | null
+  agoMinutes: number | null
+}
+
+/**
+ * The live claim a close would run over, or null when closing is free.
+ *
+ * Pure, so the fake-clock tests can pin the 15 minute edge. "Another holder" is
+ * a different actor, or the same actor in a different session when BOTH sides
+ * name one. A lease past CLAIM_LEASE_SECONDS of silence is not live — the same
+ * predicate (isClaimStale) the claim route uses to let a task be taken over.
+ */
+export const closeOverClaim = (
+  actor: Pick<Actor, 'actorId' | 'sessionId'>,
+  task: { claimed_by?: unknown; claimed_session?: unknown; heartbeat_at?: unknown },
+): ForeignClaim | null => {
+  const holder = typeof task.claimed_by === 'string' && task.claimed_by ? task.claimed_by : null
+  if (!holder) return null
+  const heartbeatAt = task.heartbeat_at ? String(task.heartbeat_at) : null
+  if (isClaimStale(heartbeatAt)) return null
+  const session = typeof task.claimed_session === 'string' && task.claimed_session ? task.claimed_session : null
+  const foreign = holder !== actor.actorId || isAnotherSessionsClaim(session, actor.sessionId)
+  if (!foreign) return null
+  const agoMinutes = heartbeatAt
+    ? Math.floor((Date.now() - new Date(heartbeatAt).getTime()) / 60000)
+    : null
+  return { holder, session, heartbeatAt, agoMinutes }
+}
+
+/** The refusal text: claim's wording, plus the way through. */
+export const closeRefusalMessage = (claim: ForeignClaim): string =>
+  `Held by ${claim.holder}${claim.agoMinutes !== null ? `, last heartbeat ${claim.agoMinutes}m ago` : ''}. ` +
+  `Closing would take the task out from under them; pass --override-claim to close it anyway ` +
+  `(a note will record who overrode whom), or wait: a lease becomes stealable after ${CLAIM_LEASE_SECONDS / 60}m of silence.`
+
+/** Both names come from the authenticated caller and the stored row. */
+export const overrideNote = (actorId: string, claim: Pick<ForeignClaim, 'holder' | 'session'>): string =>
+  `Closed over a live claim: ${actorId} overrode ${claim.holder}` +
+  `${claim.session ? ` (session ${claim.session})` : ''} with --override-claim.`
 
 /** Renewals require positive evidence of the same agent and session. */
 export const canRenewClaim = (
