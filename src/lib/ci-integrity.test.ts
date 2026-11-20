@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -52,5 +52,13 @@ describe('release validation boundary', () => {
     const { checks } = JSON.parse(readFileSync(join(process.cwd(), '.drove.json'), 'utf8'))
     expect(checks.indexOf('npm run test:integration:local')).toBeGreaterThan(checks.indexOf('npm run build'))
     expect(checks.indexOf('npm run build')).toBeGreaterThanOrEqual(0)
+  })
+
+  it('no workflow calls cairn-discord-send', () => {
+    const dir = join(process.cwd(), '.github/workflows')
+    const files = readdirSync(dir)
+    expect(files.length).toBeGreaterThan(0)
+    const offenders = files.filter((f) => readFileSync(join(dir, f), 'utf8').includes('cairn-discord-send'))
+    expect(offenders).toEqual([])
   })
 })
