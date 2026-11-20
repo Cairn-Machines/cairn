@@ -31,7 +31,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { basename, dirname, isAbsolute, join } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { homedir, hostname } from 'node:os'
 
@@ -801,8 +801,20 @@ const sweeping = () => process.env.CAIRN_SWEEP === '1' || Boolean(flags.sweep) |
  * and the server records it where a row already has room for it. An older
  * server ignores the header.
  */
+/**
+ * CAIRN_SHARE_LOCATION=off, in the environment or the instance's env file,
+ * keeps this machine's layout on this machine: no working directory, no git
+ * remote and no hostname leave it. The environment wins over the file. Only
+ * off/0/false/no (any case, trimmed) turn it off; empty or unknown means on.
+ * An explicit CAIRN_HOST is still sent, since it is a label someone chose.
+ */
+const SHARE_LOCATION = !/^(off|0|false|no)$/i.test(
+  String(process.env.CAIRN_SHARE_LOCATION ?? FILE_ENV.CAIRN_SHARE_LOCATION ?? 'on').trim(),
+)
+
 const HOST = (() => {
   let raw = process.env.CAIRN_HOST
+  if (raw === undefined && !SHARE_LOCATION) return null
   if (raw === undefined) {
     try { raw = hostname() } catch { raw = '' }
   }
@@ -2594,7 +2606,56 @@ const gitRoot = (dir) => git(dir, ['rev-parse', '--show-toplevel'])
  * to one repository is the server's rule, so the CLI, the MCP facade and an
  * import cannot drift apart on it.
  */
-const gitRemote = (dir) => git(dir, ['remote', 'get-url', 'origin'])
+const gitRemote = (dir) => (SHARE_LOCATION ? git(dir, ['remote', 'get-url', 'origin']) : null)
+
+/**
+ * With CAIRN_SHARE_LOCATION=off, what a session sends about its files and
+ * prose. Only paths under the repository's top level survive, relative to it;
+ * any other absolute path is dropped, and so is everything when there is no
+ * top level to be relative to. The hook may not see the instance env file, so
+ * the CLI does this itself.
+ */
+const repoRelativeFiles = (files, dir) => {
+  const top = dir ? gitRoot(dir) : null
+  let root = null
+  try { root = top ? realpathSync(top) : null } catch { root = top }
+  if (!root) return []
+  const out = []
+  for (const file of files) {
+    // Relative paths are relative to the session's directory, which may be a
+    // subdirectory of the repository: resolve first, then test against the root.
+    const full = resolve(dir, file)
+    // A file that is gone still has directories that are not: resolve the
+    // nearest one that exists, so a symlinked path lands under the root.
+    let abs = full
+    let head = full
+    let tail = ''
+    while (head && head !== '/') {
+      try { abs = join(realpathSync(head), tail); break } catch { tail = tail ? join(basename(head), tail) : basename(head); head = dirname(head) }
+    }
+    if (abs.startsWith(`${root}/`)) out.push(abs.slice(root.length + 1))
+  }
+  return out
+}
+
+const hostnameOrEmpty = () => { try { return hostname() } catch { return '' } }
+const replaceAll = (text, needle, to) => (needle && needle.length > 1 ? text.split(needle).join(to) : text)
+
+/** Summary prose with this machine's layout replaced: repo root, home, hostname. */
+const scrubLocation = (text, dir) => {
+  let out = String(text)
+  const top = dir ? gitRoot(dir) : null
+  const roots = new Set()
+  if (top) {
+    roots.add(top)
+    try { roots.add(realpathSync(top)) } catch { /* the plain path is enough */ }
+  }
+  for (const root of [...roots].sort((a, b) => b.length - a.length)) out = replaceAll(out, root, '<repo>')
+  const homes = new Set([HOME])
+  try { homes.add(realpathSync(HOME)) } catch { /* the plain path is enough */ }
+  for (const home of [...homes].sort((a, b) => b.length - a.length)) out = replaceAll(out, home, '~')
+  return replaceAll(out, hostnameOrEmpty(), 'private-host')
+}
 
 /**
  * Deliberately not read on the resolution path: `rev-list --max-parents=0`
@@ -3651,7 +3712,7 @@ const pairDevice = async ({ baseUrl, runtimes, write }) => {
       // The server takes a hostname's characters and no others: it goes on the
       // approval card and into every key's name.
       body: JSON.stringify({
-        host: hostname().replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 100) || 'unknown-host',
+        host: (SHARE_LOCATION ? hostname() : (process.env.CAIRN_HOST ?? '').trim() || 'private-host').replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 100) || 'unknown-host',
         runtimes,
         cliVersion: VERSION,
       }),
@@ -6750,7 +6811,7 @@ const commands = {
   async context() {
     const cwd = flags.cwd ?? process.cwd()
     const params = new URLSearchParams()
-    params.set('cwd', cwd)
+    if (SHARE_LOCATION) params.set('cwd', cwd)
     const project = flags.project ?? projectForDir(cwd)
     if (project) params.set('project', project)
     if (flags.scope !== undefined) {
@@ -6761,7 +6822,12 @@ const commands = {
     // clone, a moved directory, a worktree.
     const repo = gitRemote(cwd)
     if (repo) params.set('repo', repo)
-    if (flags.file) params.set('file', flags.file)
+    if (flags.file) {
+      // An absolute path names this machine's layout: keep it only as a path
+      // under the repository, and send nothing when it is not.
+      const [file] = SHARE_LOCATION ? [flags.file] : repoRelativeFiles([String(flags.file)], cwd)
+      if (file) params.set('file', file)
+    }
     const data = await request('GET', `/api/v1/context?${params}`)
     // The one request every session makes: it is how help learns whether the
     // Lab is on here, without sending anything itself.
@@ -7427,6 +7493,9 @@ const commands = {
     const map = readProjectMap()
     const repo = gitRemote(dir)
     let claimed = null
+    if (!SHARE_LOCATION) {
+      process.stderr.write('CAIRN_SHARE_LOCATION=off: no repository claim sent; only the local map changes\n')
+    }
 
     if (key === 'none') {
       // Releasing the repository claim too, because `map <KEY>` made one.
@@ -7646,7 +7715,7 @@ const commands = {
         externalId: need(flags.id, `usage: cairn session ${verb} --id <session-id>`),
         platformSource: flags.platform ?? defaultPlatform(),
         cwd: flags.cwd ?? process.cwd(),
-        files: splitList(flags.files),
+        files: SHARE_LOCATION ? splitList(flags.files) : repoRelativeFiles(splitList(flags.files), flags.cwd ?? process.cwd()),
         taskRefs: splitList(flags.tasks),
       }
       for (const [flag, field] of [
@@ -7656,15 +7725,23 @@ const commands = {
       ]) {
         if (flags[flag] !== undefined) payload[field] = await resolveValue(flags[flag])
       }
+      // The directory stays here: it routes locally, it is not sent.
+      const localCwd = payload.cwd
+      if (!SHARE_LOCATION) {
+        delete payload.cwd
+        for (const field of ['request', 'learned', 'completed', 'nextSteps']) {
+          if (typeof payload[field] === 'string') payload[field] = scrubLocation(payload[field], localCwd)
+        }
+      }
       // The same order as `cairn context`: the map, then the remote (which the
       // server matches against project_repos), then the cwd on the server's
       // side. Nothing here used to look, and nothing else sent a project, so
       // every live session landed unattributed (CAIRN-286).
       if (payload.project === undefined) {
-        const mapped = projectForDir(payload.cwd)
+        const mapped = projectForDir(localCwd)
         if (mapped) payload.project = mapped
       }
-      const repo = gitRemote(payload.cwd)
+      const repo = gitRemote(localCwd)
       if (repo) payload.repo = repo
       if (flags['tool-calls']) payload.toolCalls = Number(flags['tool-calls'])
       if (flags['no-checkpoint']) payload.checkpointHeld = false
@@ -7681,7 +7758,7 @@ const commands = {
     if (verb === 'list') {
       const params = new URLSearchParams()
       if (flags.project) params.set('project', flags.project)
-      if (flags.cwd) params.set('cwd', flags.cwd)
+      if (flags.cwd && SHARE_LOCATION) params.set('cwd', flags.cwd)
       if (flags.limit) params.set('limit', flags.limit)
       const data = await request('GET', `/api/v1/sessions?${params}`)
       return emit(data, {

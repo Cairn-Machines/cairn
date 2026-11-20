@@ -563,6 +563,32 @@ actor string. The actor is left alone, because it is what the whole history join
 the host is recorded beside it in each activity event's `data`. It is self-reported: a
 diagnostic, never an authorization input.
 
+### Keeping a machine's layout private — `CAIRN_SHARE_LOCATION=off`
+
+By default the CLI tells the server where it is: the working directory and git remote
+(so `cairn context` and session recording can pick a project) and the hostname. Paths
+name clients and projects, and on a shared instance every member can read what arrives
+with them. Set `CAIRN_SHARE_LOCATION=off` in the environment or in the instance's
+`~/.cairn/instances/<name>/env` file (the environment wins) and none of it leaves the
+machine. Only `off`, `0`, `false` and `no` (any case) turn it off; anything else, or
+nothing, leaves it on.
+
+With sharing off:
+
+- no `X-Cairn-Host` header unless `CAIRN_HOST` is set (a label you chose is still sent);
+  pairing sends `CAIRN_HOST`, or `private-host`;
+- `cairn context` and `session end|checkpoint` send no `cwd` and no `repo`; `session list
+  --cwd` sends nothing; routing uses `projects.json`, `cairn map` and `--project`;
+- `cairn map` writes `projects.json` but makes no repository claim on the server;
+- session `--files` keeps only paths under the git top level, sent relative to it, and
+  drops every other absolute path (all of them when there is no top level);
+  `context --file` follows the same rule;
+- session summaries have the repo root, home directory and hostname replaced by
+  `<repo>`, `~` and `private-host`.
+
+Local state is untouched: `acted.jsonl`, parked sessions and `--cwd` for local routing
+keep the real paths. Data already sent is not purged by turning the switch off.
+
 ## Keyboard
 
 | | |
