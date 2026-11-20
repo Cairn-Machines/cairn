@@ -1,4 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+const touched: string[] = []
+vi.mock('@/lib/db/client', () => ({
+  admin: () => {
+    touched.push('admin')
+    throw new Error('the database must not be read without a cwd')
+  },
+}))
 import { checkoutName, projectKeyForCheckoutName, repoName } from './project-resolution'
 
 /** Absolute fixture paths, built so no real home directory is spelled out. */
@@ -50,5 +58,25 @@ describe('attributing a session by its checkout name', () => {
   it('answers nothing for a directory no repository is named after', () => {
     expect(projectKeyForCheckoutName(rows, 'dev')).toBeNull()
     expect(projectKeyForCheckoutName(rows, null)).toBeNull()
+  })
+})
+
+/**
+ * A client with CAIRN_SHARE_LOCATION=off sends no cwd and no repo. The two
+ * cwd fallbacks must then answer null without touching the database.
+ */
+describe('resolving a project without a cwd', () => {
+  it('AC5: skips the same-cwd fallback without an error', async () => {
+    const { projectForCwd } = await import('./project-resolution')
+    await expect(projectForCwd('u1', undefined)).resolves.toBeNull()
+    await expect(projectForCwd('u1', '')).resolves.toBeNull()
+    expect(touched).toEqual([])
+  })
+
+  it('AC9: skips the folder-name fallback too, without error', async () => {
+    const { projectForCheckoutName } = await import('./project-resolution')
+    await expect(projectForCheckoutName('u1', undefined)).resolves.toBeNull()
+    await expect(projectForCheckoutName('u1', null)).resolves.toBeNull()
+    expect(touched).toEqual([])
   })
 })

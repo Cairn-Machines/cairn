@@ -38,7 +38,10 @@ export const projectForRepo = async (_userId: string, remote: string): Promise<s
  * the session recorder none did: nothing ever sent a project, so this lookup
  * had nothing to find and every live session stayed unattributed (CAIRN-286).
  */
-export const projectForCwd = async (_userId: string, cwd: string): Promise<string | null> => {
+export const projectForCwd = async (_userId: string, cwd?: string | null): Promise<string | null> => {
+  // A client with CAIRN_SHARE_LOCATION=off sends no cwd: nothing to match, and
+  // not a reason to query or to fail.
+  if (!cwd) return null
   const { data, error } = await admin()
     .from('sessions')
     .select('project:projects(key)')
@@ -95,7 +98,8 @@ export const projectKeyForCheckoutName = (
  * repository called `api` leave the session unattributed, which is honest; a
  * guess between them would be silently wrong for months.
  */
-export const projectForCheckoutName = async (_userId: string, cwd: string): Promise<string | null> => {
+export const projectForCheckoutName = async (_userId: string, cwd?: string | null): Promise<string | null> => {
+  if (!cwd) return null
   const name = checkoutName(cwd)
   if (!name) return null
   const { data, error } = await admin()
