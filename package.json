@@ -34,6 +34,7 @@
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:integration:local": "bash scripts/with-throwaway-postgres.sh 'npm run db:migrate && npm run test:integration'",
+    "test:smoke": "bash scripts/with-throwaway-postgres.sh 'npm run db:migrate && CAIRN_OPERATOR_EMAIL=smoke@example.test CAIRN_OPERATOR_PASSWORD=smoke-test-only-password npm run operator:create && playwright test --grep @smoke'",
     "check:overflow": "node scripts/check-overflow.mjs",
     "audit:controls": "node scripts/audit-controls.mjs"
   },
@@ -70,6 +71,7 @@
     "zod": "^4.6.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/jsdom": "^30.0.0",
     "@types/node": "^24",
