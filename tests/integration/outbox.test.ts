@@ -273,6 +273,7 @@ describe('durable CLI outbox', () => {
       path: '/api/v1/tasks/CAIRN-163/checkpoint',
       body: { summary: 'theirs', ownershipVersion: 7, checkpointVersion: 3 },
     })
+    await mkdir(join(home, '.cairn', 'state', 'default'), { recursive: true, mode: 0o700 })
     await writeFile(join(home, '.cairn', 'state', 'default', 'outbox.jsonl'), `${JSON.stringify(theirs)}\n`)
 
     await run(home, base, ['checkpoint', 'CAIRN-163', '--summary', 'mine'])
