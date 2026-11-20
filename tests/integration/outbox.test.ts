@@ -123,7 +123,7 @@ describe('durable CLI outbox', () => {
     )
     expect(queued.every((result) => result.code === 0 && result.stderr.includes('queued locally'))).toBe(true)
 
-    const lines = (await readFile(join(home, '.cairn', 'outbox.jsonl'), 'utf8')).trim().split('\n')
+    const lines = (await readFile(join(home, '.cairn', 'state', 'default', 'outbox.jsonl'), 'utf8')).trim().split('\n')
     const records = lines.map((line) => JSON.parse(line))
     expect(records).toHaveLength(12)
     expect(new Set(records.map((record) => record.id)).size).toBe(12)
@@ -138,7 +138,7 @@ describe('durable CLI outbox', () => {
   })
 
   it('stops the whole drain at the oldest transient failure and leaves newer shards queued', async () => {
-    const outboxDir = join(home, '.cairn')
+    const outboxDir = join(home, '.cairn', 'state', 'default')
     await mkdir(outboxDir, { recursive: true })
     const key = 'crn_integration_key'
     const makeItem = (id: string, queuedAt: string) => ({
@@ -178,7 +178,7 @@ describe('durable CLI outbox', () => {
     const replay = await run(home, base, ['replay'], 'crn_key_b')
     expect(replay.stdout).toContain('sent 0, rejected 1, still queued 0')
     expect(received).toHaveLength(0)
-    const rejected = await readFile(join(home, '.cairn', 'outbox.jsonl.rejected'), 'utf8')
+    const rejected = await readFile(join(home, '.cairn', 'state', 'default', 'outbox.jsonl.rejected'), 'utf8')
     expect(rejected).toContain('replay context mismatch')
     expect(rejected).toContain('a key this runtime no longer uses')
   })
@@ -205,7 +205,7 @@ describe('durable CLI outbox', () => {
 
   it('leaves a write queued for another instance in place while draining its own', async () => {
     await run(home, base, ['comment', 'CAIRN-163', 'mine'])
-    const outbox = join(home, '.cairn', 'outbox.jsonl')
+    const outbox = join(home, '.cairn', 'state', 'default', 'outbox.jsonl')
     const own = (await readFile(outbox, 'utf8')).trim()
     const other = { ...JSON.parse(own), id: 'other-instance-item', base: 'http://127.0.0.1:9', body: { body: 'theirs' } }
     await writeFile(outbox, `${own}\n${JSON.stringify(other)}\n`)
@@ -234,8 +234,8 @@ describe('durable CLI outbox', () => {
    * the replay ran: a checkpoint could then be sent ahead of an older one.
    */
   it('puts kept writes back in front of anything queued while the replay ran', async () => {
-    const outbox = join(home, '.cairn', 'outbox.jsonl')
-    await mkdir(join(home, '.cairn'), { recursive: true })
+    const outbox = join(home, '.cairn', 'state', 'default', 'outbox.jsonl')
+    await mkdir(join(home, '.cairn', 'state', 'default'), { recursive: true })
     await writeFile(outbox, `${JSON.stringify(foreignItem('older'))}\n`)
     mode = 'success'
 
@@ -248,8 +248,8 @@ describe('durable CLI outbox', () => {
   })
 
   it('does not drain a queue that holds only other runtimes\' writes', async () => {
-    const outbox = join(home, '.cairn', 'outbox.jsonl')
-    await mkdir(join(home, '.cairn'), { recursive: true })
+    const outbox = join(home, '.cairn', 'state', 'default', 'outbox.jsonl')
+    await mkdir(join(home, '.cairn', 'state', 'default'), { recursive: true })
     await writeFile(outbox, `${JSON.stringify(foreignItem('theirs'))}\n`)
     const before = await stat(outbox)
     mode = 'success'
@@ -273,27 +273,27 @@ describe('durable CLI outbox', () => {
       path: '/api/v1/tasks/CAIRN-163/checkpoint',
       body: { summary: 'theirs', ownershipVersion: 7, checkpointVersion: 3 },
     })
-    await writeFile(join(home, '.cairn', 'outbox.jsonl'), `${JSON.stringify(theirs)}\n`)
+    await writeFile(join(home, '.cairn', 'state', 'default', 'outbox.jsonl'), `${JSON.stringify(theirs)}\n`)
 
     await run(home, base, ['checkpoint', 'CAIRN-163', '--summary', 'mine'])
-    const lines = (await readFile(join(home, '.cairn', 'outbox.jsonl'), 'utf8')).trim().split('\n')
+    const lines = (await readFile(join(home, '.cairn', 'state', 'default', 'outbox.jsonl'), 'utf8')).trim().split('\n')
     const mine = lines.map((line) => JSON.parse(line)).find((item) => item.body.summary === 'mine')
     expect(mine?.body.checkpointVersion).toBe(3)
   })
 
   it('quarantines a foreign write with no readable queued-at time instead of keeping it forever', async () => {
-    await mkdir(join(home, '.cairn'), { recursive: true })
-    await writeFile(join(home, '.cairn', 'outbox.jsonl'), `${JSON.stringify(foreignItem('timeless', { t: undefined }))}\n`)
+    await mkdir(join(home, '.cairn', 'state', 'default'), { recursive: true })
+    await writeFile(join(home, '.cairn', 'state', 'default', 'outbox.jsonl'), `${JSON.stringify(foreignItem('timeless', { t: undefined }))}\n`)
     mode = 'success'
 
     const replay = await run(home, base, ['replay'])
     expect(replay.stdout).toContain('sent 0, rejected 1, still queued 0')
-    const rejected = await readFile(join(home, '.cairn', 'outbox.jsonl.rejected'), 'utf8')
+    const rejected = await readFile(join(home, '.cairn', 'state', 'default', 'outbox.jsonl.rejected'), 'utf8')
     expect(rejected).toContain('no queued-at time')
   })
 
   it('quarantines a foreign write nobody has replayed in 30 days, so the queue cannot grow forever', async () => {
-    await mkdir(join(home, '.cairn'), { recursive: true })
+    await mkdir(join(home, '.cairn', 'state', 'default'), { recursive: true })
     const stale = {
       id: 'stale-item',
       t: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString(),
@@ -304,12 +304,12 @@ describe('durable CLI outbox', () => {
       base,
       keyId: 'x',
     }
-    await writeFile(join(home, '.cairn', 'outbox.jsonl'), `${JSON.stringify(stale)}\n`)
+    await writeFile(join(home, '.cairn', 'state', 'default', 'outbox.jsonl'), `${JSON.stringify(stale)}\n`)
     mode = 'success'
 
     const replay = await run(home, base, ['replay'])
     expect(replay.stdout).toContain('sent 0, rejected 1, still queued 0')
-    const rejected = await readFile(join(home, '.cairn', 'outbox.jsonl.rejected'), 'utf8')
+    const rejected = await readFile(join(home, '.cairn', 'state', 'default', 'outbox.jsonl.rejected'), 'utf8')
     expect(rejected).toContain('in 30 days')
   })
 
@@ -332,7 +332,7 @@ describe('durable CLI outbox', () => {
     ['a dead PID', () => 2147483647],
   ])('recovers an abandoned replay lease with %s', async (_case, pid) => {
     await run(home, base, ['comment', 'CAIRN-163', 'recover after PID reuse'])
-    await writeFile(join(home, '.cairn', 'outbox.jsonl.replay.lock'), JSON.stringify({
+    await writeFile(join(home, '.cairn', 'state', 'default', 'outbox.jsonl.replay.lock'), JSON.stringify({
       pid: pid(), start: 'previous-process-incarnation', token: 'abandoned',
     }))
     mode = 'success'
@@ -340,12 +340,12 @@ describe('durable CLI outbox', () => {
     const replay = await run(home, base, ['replay'])
     expect(replay.code).toBe(0)
     expect(received).toHaveLength(1)
-    expect(existsSync(join(home, '.cairn', 'outbox.jsonl.replay.lock'))).toBe(false)
+    expect(existsSync(join(home, '.cairn', 'state', 'default', 'outbox.jsonl.replay.lock'))).toBe(false)
   })
 
   it('recovers a legacy pid-token lease held by an unrelated live process', async () => {
     await run(home, base, ['comment', 'CAIRN-163', 'recover legacy lease'])
-    const lock = join(home, '.cairn', 'outbox.jsonl.replay.lock')
+    const lock = join(home, '.cairn', 'state', 'default', 'outbox.jsonl.replay.lock')
     await writeFile(lock, `${process.pid}-abandoned-owner`)
     mode = 'success'
 
@@ -356,7 +356,7 @@ describe('durable CLI outbox', () => {
   })
 
   it('does not send a newer shard while an older worker is in flight and then fails transiently', async () => {
-    const outboxDir = join(home, '.cairn')
+    const outboxDir = join(home, '.cairn', 'state', 'default')
     await mkdir(outboxDir, { recursive: true })
     const makeItem = (id: string, t: string) => ({
       id, t, method: 'POST', path: `/api/v1/tasks/${id}`, body: { id },
@@ -397,7 +397,7 @@ describe('durable CLI outbox', () => {
     ])
     expect(queued.every((result) => result.code === 0)).toBe(true)
 
-    const lines = (await readFile(join(home, '.cairn', 'outbox.jsonl'), 'utf8')).trim().split('\n')
+    const lines = (await readFile(join(home, '.cairn', 'state', 'default', 'outbox.jsonl'), 'utf8')).trim().split('\n')
     const versions = lines.map((line) => JSON.parse(line).body.checkpointVersion).sort()
     expect(versions).toEqual([3, 4])
     expect(lines.every((line) => JSON.parse(line).body.ownershipVersion === 7)).toBe(true)
@@ -461,7 +461,7 @@ describe('durable CLI outbox', () => {
 
     mode = 'fail'
     await run(home, base, ['checkpoint', 'CAIRN-163', '--summary', 'next'])
-    const lines = (await readFile(join(home, '.cairn', 'outbox.jsonl'), 'utf8')).trim().split('\n')
+    const lines = (await readFile(join(home, '.cairn', 'state', 'default', 'outbox.jsonl'), 'utf8')).trim().split('\n')
     const versions = lines.map((line) => JSON.parse(line).body.checkpointVersion).sort()
     expect(versions).toEqual([3, 4])
   })
@@ -532,7 +532,7 @@ describe('durable CLI outbox', () => {
     const replay = await run(home, base, ['replay'])
     expect(replay.code).toBe(0)
     expect(replay.stdout).toContain('sent 3, rejected 0, still queued 0')
-    const artifacts = await readdir(join(home, '.cairn'))
+    const artifacts = await readdir(join(home, '.cairn', 'state', 'default'))
     expect(artifacts.filter((name) => name.includes('.ack-')).length).toBe(0)
   })
 })

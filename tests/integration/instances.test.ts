@@ -198,14 +198,14 @@ describe('several instances on one machine', () => {
 
     const result = await run(['note', 'ACME-1', 'queued'])
     expect(result.stderr).toContain('queued locally')
-    expect(existsSync(join(home, '.cairn', 'instances', 'work', 'outbox.jsonl'))).toBe(true)
+    expect(existsSync(join(home, '.cairn', 'state', 'work', 'outbox.jsonl'))).toBe(true)
     expect(existsSync(join(home, '.cairn', 'outbox.jsonl'))).toBe(false)
   })
 
   it('tags the breadcrumb the session-end hook reads with the instance', async () => {
     await configure()
     await run(['note', 'ACME-1', 'x', '--instance', 'work'])
-    const acted = (await readFile(join(home, '.cairn', 'acted.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
+    const acted = (await readFile(join(home, '.cairn', 'state', 'work', 'acted.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
     expect(acted.at(-1)).toMatchObject({ ref: 'ACME-1', instance: 'work' })
   })
 

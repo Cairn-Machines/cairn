@@ -9,6 +9,14 @@ out under **Breaking** with what to do about it.
 
 ## [Unreleased]
 
+### Changed
+
+- The CLI keeps its mutable state (outbox, acted log, `projects.json`, `project-keys.json`, `lab.json`)
+  in `~/.cairn/state/<instance>/` (`state/default/` with no instances), or `CAIRN_STATE_DIR`, apart from
+  the credentials, so an agent allowed to write only that directory can still queue a write while the
+  server is down. A queue an older CLI left beside `env` is taken over exactly once; the session-end
+  hook reads the acted log from every state directory.
+
 ### Removed
 - The CLI no longer publishes the held task to the retired herdr TUI: it never reads
   `HERDR_PANE_ID` and never starts `herdr`. The task shows only through

@@ -266,7 +266,7 @@ describe('routing a command to its instance', () => {
     expect(where()).toEqual({ personal: 0, work: 1 })
 
     const refreshed = JSON.parse(
-      await readFile(join(home, '.cairn', 'instances', 'work', 'project-keys.json'), 'utf8'),
+      await readFile(join(home, '.cairn', 'state', 'work', 'project-keys.json'), 'utf8'),
     )
     expect(refreshed.keys).toContain('WORK')
   })

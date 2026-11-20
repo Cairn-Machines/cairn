@@ -1139,16 +1139,18 @@ All under `~/.cairn/`, none of it precious except `env`:
 
 | | |
 |---|---|
-| `env` | credentials, `0600` |
-| `acted.jsonl` | a breadcrumb per accepted write, which is how a session knows which tasks it touched on a runtime whose session names the CLI cannot see |
-| `outbox.jsonl` | notes, comments and checkpoints made while the server was unreachable, replayed later; `outbox.jsonl.rejected` keeps what the server refused rather than discarding it |
-| `projects.json` | directory → project key, from `cairn map` |
-| `ownership/` | which tasks this machine holds |
+| `env` | credentials, `0600`. Credentials live alone here (and in `instances/<name>/env`): nothing the CLI writes while it runs goes beside them |
+| `state/<instance>/` | everything the CLI mutates as it runs, `0700` with `0600` files; `state/default/` on a machine with no `instances.json`. Set `CAIRN_STATE_DIR` to an absolute path to use another directory (a relative one is refused). An agent sandboxed to write only this directory can still queue a write while the server is down. Holds the files below marked ‡ |
+| `acted.jsonl` ‡ | a breadcrumb per accepted write, which is how a session knows which tasks it touched on a runtime whose session names the CLI cannot see |
+| `outbox.jsonl` ‡ | notes, comments and checkpoints made while the server was unreachable, replayed later, with its `.lock`, `.replay.lock`, `pending-*`, `processing-*` and ack files; `outbox.jsonl.rejected` keeps what the server refused rather than discarding it; `outbox.legacy-seen` records the old-location entries already taken (see below) |
+| `projects.json` ‡ | directory → project key, from `cairn map` |
+| `project-keys.json`, `lab.json` ‡ | caches: an instance's project keys (for routing a ref) and whether its Lab is on |
+| `ownership/` | which tasks this machine holds (stays beside the credentials, not in `state/`) |
 | `recorded-rollouts` | which swept transcripts have already been turned into sessions, so a sweep on a timer is idempotent |
 | `summaries.json`, `unsummarised.json`, `summariser.log` | the session summariser's reuse stamps, its retry queue, and every failure it hit |
 | `hooks/`, `maintenance/` | where the installers put the copies they manage |
 | `instances.json` | only on a machine with several instances: each one's URL, the saved routes, and what an unrouted directory does |
-| `instances/<name>/` | that instance's own `env`, outbox, `ownership/`, `projects.json` and `project-keys.json` (its project keys, for routing a ref); on such a machine the files above with those names are not read |
+| `instances/<name>/` | that instance's own `env` and `ownership/`; on such a machine the files above with those names are not read. Older CLIs kept the outbox, `projects.json` and the caches here (and at the top of `~/.cairn` with one instance): they are still read as a fallback, and a queue left there is taken into `state/` the next time the CLI queues or drains, again if an older CLI appends later, exactly once (an entry's id is the key). Where the old directory is read-only the entries are copied instead and their ids recorded in `state/<instance>/outbox.legacy-seen`; the old `outbox.jsonl.rejected` stays where it is as history |
 | `session-routes/`, `unrouted/` | answers given for one session only, and sessions that ended before anyone said which instance they belong to |
 
 ### Several instances on one machine
@@ -1173,9 +1175,10 @@ cairn note ACME-42 "…" --instance work                                # or CAI
   asks which you want (`cairn setup` never asks, and says so when it is `ask`); `--default`
   on `instance add`, or `cairn instance policy ask | default <name>` at any time,
   answers it directly.
-- Each instance keeps its own state in `~/.cairn/instances/<name>/`: `env` (the same per-runtime
-  keys as [above](#keys-and-identity)), the outbox, ownership and `projects.json`. `--adopt` moves the files at the
-  top of `~/.cairn` into the instance, and refuses if they were used with a different server
+- Each instance keeps its own state: `~/.cairn/instances/<name>/` holds `env` (the same per-runtime
+  keys as [above](#keys-and-identity)) and ownership, and `~/.cairn/state/<name>/` the outbox, `projects.json`
+  and caches. `--adopt` moves the files at the
+  top of `~/.cairn` (and `state/default/`) into the instance, and refuses if they were used with a different server
   (`CAIRN_BASE_URL`, then `~/.cairn/env`, then localhost). Interrupted, it finishes on a re-run.
   `cairn setup` adding a second instance does this itself, naming the adopted one from its url.
 - `CAIRN_API_KEY` in the environment is refused once instances are configured — it cannot say

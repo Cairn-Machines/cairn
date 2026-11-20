@@ -34,7 +34,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { delimiter, dirname, join } from 'node:path'
+import { delimiter, dirname, isAbsolute, join } from 'node:path'
 import { createInterface } from 'node:readline'
 
 const CLI = process.env.CAIRN_CLI ?? 'cairn'
@@ -494,17 +494,41 @@ const RECENT_MS = 6 * 60 * 60 * 1000
  */
 const ACTED_PATH = join(homedir(), '.cairn', 'acted.jsonl')
 
+/**
+ * The CLI now writes the log per instance, in ~/.cairn/state/<instance>/. The
+ * hook reads it before it knows which instance a session belongs to, so it
+ * reads them all, and the file older CLIs wrote at the top of ~/.cairn too.
+ * A CLI run with CAIRN_STATE_DIR keeps its log there: the hook finds it only
+ * when it inherits the same variable, and is blind to it otherwise.
+ */
+const actedLogs = () => {
+  const logs = [ACTED_PATH]
+  const override = (process.env.CAIRN_STATE_DIR ?? '').trim()
+  if (override && isAbsolute(override)) logs.push(join(override, 'acted.jsonl'))
+  try {
+    const root = join(homedir(), '.cairn', 'state')
+    for (const name of readdirSync(root)) logs.push(join(root, name, 'acted.jsonl'))
+  } catch { /* no state directory yet */ }
+  return logs
+}
+
+const readActedLines = () => {
+  const lines = []
+  for (const path of actedLogs()) {
+    try {
+      lines.push(...readFileSync(path, 'utf8').trim().split('\n'))
+    } catch { /* absent or unreadable log */ }
+  }
+  return lines
+}
+
 /** A write can land after the last transcript line, never meaningfully before. */
 const ACTED_SLACK_MS = 2 * 60 * 1000
 
 const actedFromBreadcrumbs = ({ startedAt, endedAt, cwd, sessionId }) => {
   if (!startedAt) return null
-  let lines
-  try {
-    lines = readFileSync(ACTED_PATH, 'utf8').trim().split('\n')
-  } catch {
-    return null // no CLI breadcrumbs on this machine, or none yet
-  }
+  const lines = readActedLines()
+  if (lines.length === 0) return null // no CLI breadcrumbs on this machine, or none yet
 
   const from = Date.parse(startedAt)
   const to = (endedAt ? Date.parse(endedAt) : Date.now()) + ACTED_SLACK_MS
