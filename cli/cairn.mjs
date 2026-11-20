@@ -2417,38 +2417,26 @@ const rememberWrite = (method, path, data) => {
 }
 
 /**
- * The task a pane's agent holds, shown in Herdr's sidebar.
+ * The task a terminal's agent holds, shown by the Herdr app.
  *
- * Herdr sets HERDR_PANE_ID in every pane it runs, so a claim made here knows
- * which pane to label. The token is display-only, and a crash that skips the
- * clear is covered by its TTL: the lease the maintenance sweep reclaims after.
+ * The app runs every terminal in herdr-core, which sets HC_TERMINAL_ID and keeps
+ * labels: `hc label <id> cairn.task=<text>`, read live by the app's mods. A label
+ * has no TTL, so a crash that skips the clear leaves it until the next claim,
+ * release or `session end` in that terminal. The CLI never reads HERDR_PANE_ID
+ * and never starts a `herdr` process.
  *
- * The Herdr app runs every terminal in herdr-core, which sets HC_TERMINAL_ID
- * and keeps labels instead of tokens: `hc label <id> cairn.task=<text>`, read
- * live by the app's mods. A label has no TTL, so a crash that skips the clear
- * leaves it until the next claim, release or `session end` in that terminal.
- * When both variables are set (the herdr TUI inside a herdr-app terminal, where
- * every pane inherits the same HC_TERMINAL_ID), both are labelled, each with
- * its own shown-task memory; an invalid id drops only its own target.
- *
- * Fire and forget: no herdr binary, no pane, a slow socket, all are normal and
+ * Fire and forget: no hc binary, no terminal, a slow socket, all are normal and
  * none may touch the command's output, exit code or latency.
  * `CAIRN_HERDR=0` opts out.
  */
-const HERDR_TOKEN = 'cairn_task'
-const HERDR_TOKEN_TTL_MS = 2 * 60 * 60 * 1000
 const HERDR_TOKEN_MAX = 120
 
 const HC_LABEL = 'cairn.task'
 
 const herdrPanes = () => {
   if (process.env.CAIRN_HERDR === '0') return []
-  const panes = []
   const terminal = (process.env.HC_TERMINAL_ID || '').trim()
-  if (/^\w[\w:/.-]*$/.test(terminal)) panes.push({ hc: true, id: terminal })
-  const pane = (process.env.HERDR_PANE_ID || '').trim()
-  if (/^[\w:.-]+$/.test(pane)) panes.push({ hc: false, id: pane })
-  return panes
+  return /^\w[\w:/.-]*$/.test(terminal) ? [{ id: terminal }] : []
 }
 
 const herdrTokenText = (ref, title) => {
@@ -2459,10 +2447,10 @@ const herdrTokenText = (ref, title) => {
 /**
  * The deadline lives in the child, not here. The CLI exits within milliseconds
  * of a claim, and a timer of its own dies with it: an unref'd kill timer never
- * fired, so a hung herdr (a wedged socket) left one sh + herdr pair behind per
+ * fired, so a hung hc (a wedged socket) left one sh + hc pair behind per
  * claim, beat and checkpoint. spawn's `timeout` option would instead hold the
  * CLI open for its full length. So sh brings its own watchdog; detached makes
- * sh a group leader, and `kill 0` takes the whole group, hung herdr included.
+ * sh a group leader, and `kill 0` takes the whole group, hung hc included.
  * `sleep` and `kill` are POSIX; `timeout` is not on a stock Mac.
  */
 const HERDR_DEADLINE_S = 5
@@ -2470,18 +2458,10 @@ const HERDR_DEADLINE_S = 5
 /** Shows `text`, or clears what is shown when it is null. */
 const herdrReport = (pane, text) => {
   try {
-    // Herdr raises no plugin event for a metadata report, so the legacy plugin is asked to
-    // resync once the token has landed; arguments go through "$@", never through the script text.
-    const command = pane.hc
-      ? 'hc label "$@"'
-      : 'herdr pane report-metadata "$@" && herdr plugin action invoke sync --plugin cairn.pane-title'
-    const argv = pane.hc
-      ? [pane.id, `${HC_LABEL}=${text ?? ''}`]
-      : text === null
-        ? [pane.id, '--source', 'cairn', '--clear-token', HERDR_TOKEN]
-        : [pane.id, '--source', 'cairn', '--token', `${HERDR_TOKEN}=${text}`, '--ttl-ms', String(HERDR_TOKEN_TTL_MS)]
+    // Arguments go through "$@", never through the script text.
+    const argv = [pane.id, `${HC_LABEL}=${text ?? ''}`]
     const script =
-      `( sleep ${HERDR_DEADLINE_S}; kill -s KILL 0 ) & watchdog=$!; ${command}; ` +
+      `( sleep ${HERDR_DEADLINE_S}; kill -s KILL 0 ) & watchdog=$!; hc label "$@"; ` +
       'kill $watchdog 2>/dev/null'
     const child = spawn('sh', ['-c', script, 'sh', ...argv], {
       detached: true,
@@ -2494,7 +2474,7 @@ const herdrReport = (pane, text) => {
 
 /** What this pane or terminal shows is remembered, so a beat can refresh it and a release clear only its own. */
 const herdrShownPath = (pane) =>
-  join(CAIRN_DIR, 'herdr', `${pane.hc ? 'terminal' : 'pane'}-${pane.id.replace(/[^\w.-]/g, '_')}.json`)
+  join(CAIRN_DIR, 'herdr', `terminal-${pane.id.replace(/[^\w.-]/g, '_')}.json`)
 
 const herdrPublish = (method, path, data) => {
   for (const pane of herdrPanes()) herdrPublishTo(pane, method, path, data)

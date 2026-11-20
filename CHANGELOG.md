@@ -9,6 +9,11 @@ out under **Breaking** with what to do about it.
 
 ## [Unreleased]
 
+### Removed
+- The CLI no longer publishes the held task to the retired herdr TUI: it never reads
+  `HERDR_PANE_ID` and never starts `herdr`. The task shows only through
+  `hc label $HC_TERMINAL_ID cairn.task=…`.
+
 ## [0.25.7] — 2026-11-09
 
 ### Changed

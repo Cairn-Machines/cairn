@@ -181,7 +181,7 @@ describe('tab label', () => {
   })
 })
 
-describe('the CLI publishes the claimed task to Herdr', () => {
+describe('the CLI labels the claimed task through hc', () => {
   const serve = (title: string) =>
     new Promise<string>((done) => {
       const server = createServer((req, res) => {
@@ -199,7 +199,7 @@ describe('the CLI publishes the claimed task to Herdr', () => {
       server.listen(0, '127.0.0.1', () => done(`http://127.0.0.1:${(server.address() as { port: number }).port}`))
     })
 
-  const setup = async (title: string, herdrEnv: Record<string, string> = { HERDR_PANE_ID: 'w1:p1' }) => {
+  const setup = async (title: string, herdrEnv: Record<string, string> = { HC_TERMINAL_ID: 'm1/t7' }) => {
     const home = await scratch()
     const bin = join(home, 'bin')
     const log = join(home, 'herdr.log')
@@ -232,9 +232,8 @@ describe('the CLI publishes the claimed task to Herdr', () => {
         child.on('error', fail)
         child.on('close', (code) => done({ code, stdout, stderr }))
       })
-    const RESYNC = 'plugin action invoke sync --plugin cairn.pane-title'
     const reports = async () =>
-      (await readFile(log, 'utf8').catch(() => '')).split('\n').filter((l) => l && l !== RESYNC)
+      (await readFile(log, 'utf8').catch(() => '')).split('\n').filter((l) => l)
     const calls = async (wanted: number) => {
       for (let i = 0; i < 40; i += 1) {
         const lines = await reports()
@@ -246,28 +245,66 @@ describe('the CLI publishes the claimed task to Herdr', () => {
     return { cairn, calls, log }
   }
 
-  it('reports the ref and title with a two-hour TTL after a claim, then refreshes on beat and checkpoint, then clears on release', async () => {
-    const { cairn, calls, log } = await setup('Nommer les panes')
+  it('labels the terminal after a claim, refreshes on beat and checkpoint, clears on release, and never calls herdr', async () => {
+    const { cairn, calls } = await setup('Nommer les panes', { HC_TERMINAL_ID: 't7', HERDR_PANE_ID: 'w1:p1' })
     const claimed = await cairn(['claim', 'CAIRN-15'])
     expect(claimed.code).toBe(0)
-    expect(claimed.stdout).not.toContain('herdr')
-    const lines = await calls(1)
-    expect(lines[0]).toBe('pane report-metadata w1:p1 --source cairn --token cairn_task=CAIRN-15 · Nommer les panes --ttl-ms 7200000')
-    await new Promise((r) => setTimeout(r, 200))
-    expect(await readFile(log, 'utf8')).toContain(`${lines[0]}\nplugin action invoke sync --plugin cairn.pane-title\n`)
-
+    expect(claimed.stdout).not.toContain('hc')
+    const label = 'hc label t7 cairn.task=CAIRN-15 · Nommer les panes'
+    expect(await calls(1)).toEqual([label])
     await cairn(['beat', 'CAIRN-15'])
-    expect((await calls(2))[1]).toBe(lines[0])
-
+    expect(await calls(2)).toEqual([label, label])
     await cairn(['checkpoint', 'CAIRN-15', '--summary', 'halfway'])
-    expect((await calls(3))[2]).toBe(lines[0])
-
+    expect(await calls(3)).toEqual([label, label, label])
     await cairn(['release', 'CAIRN-15'])
-    expect((await calls(4))[3]).toBe('pane report-metadata w1:p1 --source cairn --clear-token cairn_task')
+    expect(await calls(4)).toEqual([label, label, label, 'hc label t7 cairn.task='])
+  })
+
+  it('AC1: claim and release exit 0 with HERDR_PANE_ID set, no HC_TERMINAL_ID and no herdr on PATH', async () => {
+    const home = await scratch()
+    const without = (process.env.PATH ?? '').split(':').filter((d) => !existsSync(join(d, 'herdr')) && !existsSync(join(d, 'hc'))).join(':')
+    const base = await serve('Nommer les panes')
+    const run = (verb: string) =>
+      new Promise<number | null>((done) => {
+        const child = spawn(process.execPath, ['cli/cairn.mjs', verb, 'CAIRN-15'], {
+          env: { ...process.env, HOME: home, PATH: without, CAIRN_BASE_URL: base, CAIRN_API_KEY: 'k', CAIRN_AGENT: 'test', HERDR_PANE_ID: 'w1:p1', HC_TERMINAL_ID: '' },
+        })
+        child.stdout.resume()
+        child.stderr.resume()
+        child.on('close', done)
+      })
+    expect(await run('claim')).toBe(0)
+    expect(await run('release')).toBe(0)
+  })
+
+  it('AC2: a herdr stub logs no call across claim, beat and release with both variables set', async () => {
+    const { cairn, calls, log } = await setup('Nommer les panes', { HC_TERMINAL_ID: 't7', HERDR_PANE_ID: 'w1:p1' })
+    const herdrLog = `${log}.herdr`
+    const bin = join(log, '..', 'bin')
+    await writeFile(join(bin, 'herdr'), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${herdrLog}"\n`)
+    for (const verb of ['claim', 'beat', 'release']) await cairn([verb, 'CAIRN-15'])
+    await calls(3)
+    await new Promise((r) => setTimeout(r, 300))
+    expect(existsSync(herdrLog)).toBe(false)
+    expect((await readFile(log, 'utf8')).includes('report-metadata')).toBe(false)
+  })
+
+  it('AC3: claim labels the terminal with the ref and title', async () => {
+    const { cairn, calls } = await setup('Nommer les panes', { HC_TERMINAL_ID: 't7' })
+    await cairn(['claim', 'CAIRN-15'])
+    expect(await calls(1)).toEqual(['hc label t7 cairn.task=CAIRN-15 · Nommer les panes'])
+  })
+
+  it('AC4: release clears the label a claim set', async () => {
+    const { cairn, calls } = await setup('Nommer les panes', { HC_TERMINAL_ID: 't7' })
+    await cairn(['claim', 'CAIRN-15'])
+    await calls(1)
+    await cairn(['release', 'CAIRN-15'])
+    expect((await calls(2))[1]).toBe('hc label t7 cairn.task=')
   })
 
   it('leaves another task\'s label alone when a different ref is released', async () => {
-    const { cairn, calls, log } = await setup('Nommer les panes')
+    const { cairn, calls } = await setup('Nommer les panes', { HC_TERMINAL_ID: 'm1/t7' })
     await cairn(['claim', 'CAIRN-15'])
     await calls(1)
     await cairn(['release', 'CAIRN-99'])
@@ -275,60 +312,24 @@ describe('the CLI publishes the claimed task to Herdr', () => {
     expect(await calls(2)).toHaveLength(1)
   })
 
-  it('labels an hc terminal, and clears only its own label', async () => {
-    const { cairn, calls } = await setup('Nommer les panes', { HC_TERMINAL_ID: 'm1/t7' })
-    const claimed = await cairn(['claim', 'CAIRN-15'])
-    expect(claimed.code).toBe(0)
-    expect(claimed.stdout).not.toContain('hc')
-    const label = 'hc label m1/t7 cairn.task=CAIRN-15 · Nommer les panes'
-    expect(await calls(1)).toEqual([label])
-    await cairn(['beat', 'CAIRN-15'])
-    expect(await calls(2)).toEqual([label, label])
-    await cairn(['release', 'CAIRN-99'])
-    await new Promise((r) => setTimeout(r, 300))
-    expect(await calls(3)).toHaveLength(2)
-    await cairn(['release', 'CAIRN-15'])
-    expect((await calls(3))[2]).toBe('hc label m1/t7 cairn.task=')
-  })
-
-  it('labels both the hc terminal and the herdr pane when both are set, and clears both', async () => {
-    const { cairn, calls } = await setup('Nommer les panes', { HC_TERMINAL_ID: 'm1/t7', HERDR_PANE_ID: 'w1:p1' })
-    await cairn(['claim', 'CAIRN-15'])
-    const claim = [
-      'hc label m1/t7 cairn.task=CAIRN-15 · Nommer les panes',
-      'pane report-metadata w1:p1 --source cairn --token cairn_task=CAIRN-15 · Nommer les panes --ttl-ms 7200000',
-    ]
-    expect((await calls(2)).sort()).toEqual(claim)
-    await cairn(['beat', 'CAIRN-15'])
-    expect((await calls(4)).slice(2).sort()).toEqual(claim)
-    await cairn(['release', 'CAIRN-15'])
-    expect((await calls(6)).slice(4).sort()).toEqual([
-      'hc label m1/t7 cairn.task=',
-      'pane report-metadata w1:p1 --source cairn --clear-token cairn_task',
-    ])
-  })
-
-  it.each(['t1; touch x', '-x'])('ignores the hc terminal id %j and labels only the pane', async (id) => {
+  it.each(['t1; touch x', '-x'])('ignores the hc terminal id %j', async (id) => {
     const { cairn, calls } = await setup('Nommer les panes', { HC_TERMINAL_ID: id, HERDR_PANE_ID: 'w1:p1' })
     await cairn(['claim', 'CAIRN-15'])
     await new Promise((r) => setTimeout(r, 300))
-    expect(await calls(1)).toEqual([
-      'pane report-metadata w1:p1 --source cairn --token cairn_task=CAIRN-15 · Nommer les panes --ttl-ms 7200000',
-    ])
+    expect(await calls(1)).toEqual([])
   })
 
-  it('truncates a long title', async () => {
+  it('AC5: truncates a long title to 120 characters ending with an ellipsis', async () => {
     const { cairn, calls } = await setup('x'.repeat(300))
     await cairn(['claim', 'CAIRN-15'])
-    const token = (await calls(1))[0]?.split(' --token ')[1]?.split(' --ttl-ms')[0] ?? ''
-    expect(token.length).toBeLessThanOrEqual('cairn_task='.length + 120)
-    expect(token.endsWith('…')).toBe(true)
+    const text = (await calls(1))[0]?.split(' cairn.task=')[1] ?? ''
+    expect(text.length).toBe(120)
+    expect(text.endsWith('…')).toBe(true)
   })
 
-  it('does nothing outside Herdr or with CAIRN_HERDR=0', async () => {
+  it('does nothing outside hc or with CAIRN_HERDR=0', async () => {
     const envs = [
-      { HERDR_PANE_ID: '' },
-      { HERDR_PANE_ID: 'w1:p1', CAIRN_HERDR: '0' },
+      { HC_TERMINAL_ID: '' },
       { HC_TERMINAL_ID: 't7', CAIRN_HERDR: '0' },
     ] as Record<string, string>[]
     for (const env of envs) {
@@ -340,16 +341,13 @@ describe('the CLI publishes the claimed task to Herdr', () => {
     }
   })
 
-  it.each([
-    ['herdr', { HERDR_PANE_ID: 'w1:p1', HC_TERMINAL_ID: '' }],
-    ['hc', { HC_TERMINAL_ID: 't7', HERDR_PANE_ID: '' }],
-  ])('never fails a command when %s is missing', async (bin, herdrEnv) => {
+  it('never fails a command when hc is missing', async () => {
     const home = await scratch()
-    const without = (process.env.PATH ?? '').split(':').filter((d) => !existsSync(join(d, bin))).join(':')
+    const without = (process.env.PATH ?? '').split(':').filter((d) => !existsSync(join(d, 'hc'))).join(':')
     const base = await serve('Nommer les panes')
     const code = await new Promise<number | null>((done) => {
       const child = spawn(process.execPath, ['cli/cairn.mjs', 'claim', 'CAIRN-15'], {
-        env: { ...process.env, HOME: home, PATH: without, CAIRN_BASE_URL: base, CAIRN_API_KEY: 'k', CAIRN_AGENT: 'test', ...herdrEnv },
+        env: { ...process.env, HOME: home, PATH: without, CAIRN_BASE_URL: base, CAIRN_API_KEY: 'k', CAIRN_AGENT: 'test', HC_TERMINAL_ID: 't7' },
       })
       child.stdout.resume()
       child.stderr.resume()
@@ -358,10 +356,10 @@ describe('the CLI publishes the claimed task to Herdr', () => {
     expect(code).toBe(0)
   })
 
-  it('kills a hung herdr on its own deadline, after the command has exited (spawns real processes and waits out the herdr deadline, so 60 s headroom on a loaded host)', async () => {
-    const { cairn, log } = await setup('Nommer les panes')
+  it('kills a hung hc on its own deadline, after the command has exited (spawns real processes and waits out the hc deadline, so 60 s headroom on a loaded host)', async () => {
+    const { cairn, log } = await setup('Nommer les panes', { HC_TERMINAL_ID: 't7' })
     const pids = `${log}.pids`
-    await writeFile(join(log, '..', 'bin', 'herdr'), `#!/bin/sh\necho $$ >> "${pids}"\nexec sleep 60\n`)
+    await writeFile(join(log, '..', 'bin', 'hc'), `#!/bin/sh\necho $$ >> "${pids}"\nexec sleep 60\n`)
     const claimed = await cairn(['claim', 'CAIRN-15'])
     expect(claimed.code).toBe(0)
     let pid = 0

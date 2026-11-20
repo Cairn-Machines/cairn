@@ -20,19 +20,13 @@ with no agent is left alone.
 
 ## The CLI half
 
-Inside a Herdr pane (`HERDR_PANE_ID` set), `cairn claim`, a claiming `cairn add`,
-`cairn beat` and `cairn checkpoint` run `herdr pane report-metadata --source cairn --token cairn_task=<REF> · <title>`
-with a two-hour TTL, the same two hours after which the maintenance sweep releases a silent
-claim. `done`, `cancel`, `release` and `session end` clear it; a release of a different task
-than the one shown leaves it. The call is detached, silent and ignores every failure, so a
-missing `herdr` costs nothing. `CAIRN_HERDR=0` turns it off.
-
-Inside a herdr-core terminal (`HC_TERMINAL_ID` set) the same events run
-`hc label "$HC_TERMINAL_ID" "cairn.task=<REF> · <title>"` and clear it with
-`hc label "$HC_TERMINAL_ID" cairn.task=`. A label has no TTL: a crash that skips the clear
-leaves it until the next claim, release or `session end` in that terminal. When both
-variables are set, as for the herdr TUI running inside a herdr-app terminal, both the label
-and the pane token are set and cleared; an invalid id drops only its own target.
+Inside a herdr-core terminal (`HC_TERMINAL_ID` set), `cairn claim`, a claiming `cairn add`,
+`cairn beat` and `cairn checkpoint` run `hc label "$HC_TERMINAL_ID" "cairn.task=<REF> · <title>"`.
+`done`, `cancel`, `release` and `session end` clear it with `hc label "$HC_TERMINAL_ID" cairn.task=`;
+a release of a different task than the one shown leaves it. A label has no TTL: a crash that
+skips the clear leaves it until the next claim, release or `session end` in that terminal.
+The call is detached, silent and ignores every failure, so a missing `hc` costs nothing. The
+CLI never reads `HERDR_PANE_ID` and never starts `herdr`. `CAIRN_HERDR=0` turns it off.
 
 ## The plugin
 
