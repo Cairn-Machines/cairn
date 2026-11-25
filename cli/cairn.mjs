@@ -21,6 +21,7 @@ import {
   chmodSync,
   constants as fsConstants,
   existsSync,
+  fstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -1508,10 +1509,62 @@ const tellMove = (requested, moved, ref) => {
   process.stderr.write(`${moved.ref} moved to ${to} on ${renameDay(moved.at)}. ${moved.ref} still resolves; write ${to}.\n`)
 }
 
-/** `-` means read the value from stdin, so long markdown bodies stay off argv. */
+/**
+ * `-` means read the value from stdin, so long markdown bodies stay off argv.
+ *
+ * An agent's shell often hands a command a stdin that is never written and
+ * never closed: one `cairn note … --body -` without a redirect waited 8 h and
+ * held a factory slot all that time (CAIRN-457). So a terminal is refused at
+ * once, and a pipe or socket that says nothing for CAIRN_STDIN_TIMEOUT_MS
+ * (10 s) is given up on. A body that has started is read to its end, however
+ * slowly it comes, and a redirected file is read as it always was.
+ */
+const NO_STDIN_BODY = 'no body on stdin: pipe or redirect it, or use a heredoc'
+const stdinWaitMs = () => {
+  const ms = Number(process.env.CAIRN_STDIN_TIMEOUT_MS)
+  return Number.isFinite(ms) && ms > 0 ? ms : 10_000
+}
 const readStdin = async () => {
+  if (process.stdin.isTTY) die(NO_STDIN_BODY)
+  let regularFile = false
+  try {
+    regularFile = fstatSync(0).isFile()
+  } catch {
+    // no fd 0 to look at: treat it as a stream
+  }
   const chunks = []
-  for await (const chunk of process.stdin) chunks.push(chunk)
+  if (regularFile) {
+    for await (const chunk of process.stdin) chunks.push(chunk)
+    return Buffer.concat(chunks).toString('utf8')
+  }
+  const started = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      process.stdin.off('data', onData)
+      process.stdin.off('end', onEnd)
+      process.stdin.off('error', onError)
+      process.stdin.pause()
+      resolve(false)
+    }, stdinWaitMs())
+    const settle = (fn) => (value) => {
+      clearTimeout(timer)
+      process.stdin.off('data', onData)
+      process.stdin.off('end', onEnd)
+      process.stdin.off('error', onError)
+      fn(value)
+    }
+    const onData = settle((chunk) => {
+      chunks.push(chunk)
+      process.stdin.pause()
+      resolve(true)
+    })
+    const onEnd = settle(() => resolve(null))
+    const onError = settle(reject)
+    process.stdin.on('data', onData)
+    process.stdin.once('end', onEnd)
+    process.stdin.once('error', onError)
+  })
+  if (started === false) die(`${NO_STDIN_BODY} (nothing arrived in ${Math.round(stdinWaitMs() / 1000)} s)`)
+  if (started) for await (const chunk of process.stdin) chunks.push(chunk)
   return Buffer.concat(chunks).toString('utf8')
 }
 const resolveValue = async (v) => (v === '-' ? (await readStdin()).trim() : v)
@@ -3564,7 +3617,9 @@ const HELP = `cairn — agent-first task tracker and shared memory
 
   output
     --json | --pretty              default is TSV: count line, header, rows
-    --body -  /  --resolution -    read the value from stdin
+    --body -  /  --resolution -    read the value from stdin: pipe, redirect or heredoc;
+                                   a terminal is refused, and a stream silent for
+                                   10 s gives up (CAIRN_STDIN_TIMEOUT_MS)
     bodies are markdown: ## headings, - lists, code in backticks (a wall of text is refused)
 
   env: CAIRN_BASE_URL, CAIRN_API_KEY
