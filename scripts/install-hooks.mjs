@@ -60,6 +60,7 @@ const wanted = (runtime, label) => {
 const CONTEXT = join(HOME, '.cairn', 'hooks', 'cairn-context.mjs')
 const SESSION_END = join(HOME, '.cairn', 'hooks', 'cairn-session-end.mjs')
 const LEARN_NUDGE = join(HOME, '.cairn', 'hooks', 'cairn-learn-nudge.mjs')
+const MEMORY_MIRROR = join(HOME, '.cairn', 'hooks', 'cairn-memory-mirror.mjs')
 
 /** Marks the entries this installer owns, so re-running replaces rather than duplicates. */
 const TAG = 'cairn-memory'
@@ -129,6 +130,7 @@ const installScripts = () => {
   copyFileSync(join(REPO, 'hooks', 'cairn-context.mjs'), CONTEXT)
   copyFileSync(join(REPO, 'hooks', 'cairn-session-end.mjs'), SESSION_END)
   copyFileSync(join(REPO, 'hooks', 'cairn-learn-nudge.mjs'), LEARN_NUDGE)
+  copyFileSync(join(REPO, 'hooks', 'cairn-memory-mirror.mjs'), MEMORY_MIRROR)
   log(`  scripts -> ${dirname(CONTEXT)}`)
 }
 
@@ -150,7 +152,7 @@ const installScripts = () => {
  * would miss exactly the stale entry that most needs replacing. Nothing else
  * on a machine runs a file called `cairn-session-end.mjs`.
  */
-const SCRIPT_NAMES = ['cairn-context.mjs', 'cairn-session-end.mjs', 'cairn-learn-nudge.mjs']
+const SCRIPT_NAMES = ['cairn-context.mjs', 'cairn-session-end.mjs', 'cairn-learn-nudge.mjs', 'cairn-memory-mirror.mjs']
 
 const isMine = (hook) =>
   Boolean(hook?.[TAG]) ||
@@ -255,9 +257,13 @@ const installClaude = () => {
   replace('PreCompact', null, mine(`node ${SESSION_END}`, { timeout: 120, async: true }))
   // Not async: a Stop hook can only block by answering before the turn ends.
   replace('Stop', null, mine(`node ${LEARN_NUDGE}`, { timeout: 10 }))
+  // Not async either: the block is how the agent hears it. Claude memory only,
+  // so Claude only: a memory file written without a `cairn learn` (CAIRN-458).
+  replace('PostToolUse', 'Write|Edit|MultiEdit', mine(`node ${MEMORY_MIRROR}`, { timeout: 10 }))
 
   if (writeJson(path, settings, before)) {
-    log('  claude: SessionStart, SessionEnd, PreCompact, Stop (asks once per session to cairn learn)')
+    log('  claude: SessionStart, SessionEnd, PreCompact, Stop (asks once per session to cairn learn),')
+    log('          PostToolUse on Write|Edit (a Claude memory file asks to be mirrored with cairn learn)')
     if (unwired) log('  claude: removed the per-Read PreToolUse hook (CCS-40)')
   }
 }

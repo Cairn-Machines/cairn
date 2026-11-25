@@ -9,6 +9,17 @@ out under **Breaking** with what to do about it.
 
 ## [Unreleased]
 
+### Added
+
+- **Claude memory is mirrored to Cairn** (CAIRN-458). A new Claude Code hook,
+  `cairn-memory-mirror.mjs` on `PostToolUse` for `Write|Edit|MultiEdit`, blocks when the agent
+  writes one of Claude Code's memory files (`~/.claude/projects/<project>/memory/*.md`, not
+  `MEMORY.md`) with the `cairn learn` or `relearn` command that mirrors it, on the instance
+  `cairn route` resolves for the session's directory. The learn nudge asks once per session, so
+  memory written late in a session that had already learned went unmirrored. Silent when the turn
+  already ran `cairn learn`/`relearn`, inside a summariser, and with `CAIRN_MEMORY_MIRROR=0`.
+  Re-run `cairn setup` (or `node scripts/install-hooks.mjs`) to wire it.
+
 ### Changed
 
 - The CLI keeps its mutable state (outbox, acted log, `projects.json`, `project-keys.json`, `lab.json`)
