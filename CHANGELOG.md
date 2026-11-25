@@ -9,6 +9,8 @@ out under **Breaking** with what to do about it.
 
 ## [Unreleased]
 
+## [0.26.1] — 2026-11-25
+
 ### Fixed
 
 - **`--body -` no longer waits forever when nothing arrives on stdin** (CAIRN-457). A terminal is
@@ -2320,7 +2322,8 @@ which it became something somebody else could reasonably run.
   vitals, sweep transcripts from runtimes that have no session-end event.
 - Backup and restore-drill scripts, because an untested backup is not a backup.
 
-[Unreleased]: https://github.com/montytorr/cairn/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/montytorr/cairn/compare/v0.26.1...HEAD
+[0.26.1]: https://github.com/montytorr/cairn/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/montytorr/cairn/compare/v0.25.7...v0.26.0
 [0.25.7]: https://github.com/montytorr/cairn/compare/v0.25.6...v0.25.7
 [0.25.6]: https://github.com/montytorr/cairn/compare/v0.25.5...v0.25.6
