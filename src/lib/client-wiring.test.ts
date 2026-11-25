@@ -370,10 +370,16 @@ describe('the installer and the per-Read hook CCS-40 removed', () => {
       { matcher: 'Read', hooks: [foreignPre] },
       { matcher: 'Bash', hooks: [{ type: 'command', command: '/guard.sh' }] },
     ])
-    expect(Object.keys(claude.hooks).sort()).toEqual(['PreCompact', 'PreToolUse', 'SessionEnd', 'SessionStart', 'Stop'])
+    expect(Object.keys(claude.hooks).sort()).toEqual(['PostToolUse', 'PreCompact', 'PreToolUse', 'SessionEnd', 'SessionStart', 'Stop'])
     // The learn nudge blocks Stop, which only a synchronous hook can (CAIRN-323).
     expect(claude.hooks.Stop).toEqual([{ hooks: [expect.objectContaining({ command: expect.stringMatching(/cairn-learn-nudge\.mjs$/) })] }])
     expect(claude.hooks.Stop[0].hooks[0].async).toBeUndefined()
+    // A memory file written without a cairn learn blocks, so synchronous too (CAIRN-458).
+    expect(claude.hooks.PostToolUse).toEqual([
+      { matcher: 'Write|Edit|MultiEdit', hooks: [expect.objectContaining({ command: expect.stringMatching(/cairn-memory-mirror\.mjs$/) })] },
+    ])
+    expect(claude.hooks.PostToolUse[0].hooks[0].async).toBeUndefined()
+    expect(await readFile(join(home, '.cairn/hooks/cairn-memory-mirror.mjs'), 'utf8')).toContain('CAIRN-458')
 
     const codex = JSON.parse(await readFile(join(home, '.codex/hooks.json'), 'utf8'))
     expect(codex.hooks.PreToolUse).toBeUndefined()

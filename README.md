@@ -933,7 +933,7 @@ its own and touches nobody else's. Coverage differs by runtime:
 
 | Runtime | Session start | Session recorded |
 |---|---|---|
-| Claude Code | `SessionStart` | `SessionEnd` **and** `PreCompact`; `Stop` asks once per session to `cairn learn` |
+| Claude Code | `SessionStart` | `SessionEnd` **and** `PreCompact`; `Stop` asks once per session to `cairn learn`; `PostToolUse` asks to mirror a Claude memory file into Cairn |
 | Codex | `SessionStart` | `SessionEnd`, with a live checkpoint on every `Stop` that never ends the session or touches held tasks; `Stop` also asks once per session to `cairn learn` |
 | Hermes Agent by Nous Research | `pre_llm_call` on the first turn only | — session recording is deliberately not installed |
 | OpenClaw | `agent:bootstrap`, via the `cairn-briefing` hook package the installer links with `openclaw hooks install --link` (restart the gateway after) | swept from disk on a schedule — it has no session event of any kind |
@@ -949,6 +949,13 @@ but nothing used to ask them. Two questions, neither of which calls a model:
   and only after a turn that edited a file or made a commit. It never asks on the
   continuation its own block caused, in a session that already ran `cairn learn`, or inside
   a summariser. `CAIRN_LEARN_NUDGE=0` turns it off.
+- On Claude Code, `PostToolUse` on `Write|Edit|MultiEdit` runs `cairn-memory-mirror.mjs`
+  (CAIRN-458). Writing one of Claude Code's own memory files
+  (`~/.claude/projects/<project>/memory/*.md`, not the `MEMORY.md` index) blocks with the
+  `cairn learn` (or `relearn`) command that mirrors it, on the instance `cairn route`
+  resolves for the session's directory: file memory reaches the next Claude session in that
+  directory, Cairn every agent. It stays silent when the same turn already ran `cairn learn`
+  or `relearn`, inside a summariser, and with `CAIRN_MEMORY_MIRROR=0`.
 
 On Codex the installer also lists every hook in `hooks.json` that is not Cairn's, and marks
 the ones on `Stop`: `Stop` fires after **every turn**, so a session-end script written for

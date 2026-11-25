@@ -229,6 +229,14 @@ const ARTEFACTS = [
       at(join(home, '.cairn/hooks/cairn-learn-nudge.mjs')),
     ],
   },
+  {
+    name: 'hook:memory-mirror',
+    file: 'hooks/cairn-memory-mirror.mjs',
+    mode: 0o755,
+    targets: [
+      at(join(home, '.cairn/hooks/cairn-memory-mirror.mjs')),
+    ],
+  },
   /**
    * OpenClaw's bootstrap hook, which install-hooks.mjs copies here and links
    * with `openclaw hooks install --link`. A linked directory is read in place,
