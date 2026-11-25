@@ -9,6 +9,14 @@ out under **Breaking** with what to do about it.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--body -` no longer waits forever when nothing arrives on stdin** (CAIRN-457). A terminal is
+  refused at once, and a pipe or socket that sends nothing for 10 s (`CAIRN_STDIN_TIMEOUT_MS`) exits 1
+  with "no body on stdin: pipe or redirect it, or use a heredoc". A body that has started is read to
+  its end, and a redirected file or a heredoc reads as before. One unredirected `cairn note … --body -`
+  in an agent's shell had waited 8 hours and held a factory slot all that time.
+
 ## [0.26.0] — 2026-11-25
 
 ### Added
