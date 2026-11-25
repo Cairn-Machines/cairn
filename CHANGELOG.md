@@ -19,9 +19,15 @@ out under **Breaking** with what to do about it.
   memory written late in a session that had already learned went unmirrored. Silent when the turn
   already ran `cairn learn`/`relearn`, inside a summariser, and with `CAIRN_MEMORY_MIRROR=0`.
   Re-run `cairn setup` (or `node scripts/install-hooks.mjs`) to wire it.
+- **`CAIRN_SHARE_LOCATION=off`** (CAIRN-452) keeps the working directory, git remote and hostname
+  off the wire: the CLI sends none of them in headers, pairing, context, map or session payloads,
+  and file paths go repo-relative.
 
 ### Changed
 
+- **`done` and `cancel` refuse over another holder's live claim** (CAIRN-456): the server answers
+  409 `already_claimed`, in claim's wording, when another actor or session holds the task.
+  `--override-claim` (MCP `override_claim`) closes it anyway and logs a note naming both holders.
 - The CLI keeps its mutable state (outbox, acted log, `projects.json`, `project-keys.json`, `lab.json`)
   in `~/.cairn/state/<instance>/` (`state/default/` with no instances), or `CAIRN_STATE_DIR`, apart from
   the credentials, so an agent allowed to write only that directory can still queue a write while the
