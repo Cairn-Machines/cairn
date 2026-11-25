@@ -16,7 +16,7 @@ let memoryDir: string
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'cairn-mirror-'))
-  memoryDir = join(dir, '.claude', 'projects', '-Users-cal-repo', 'memory')
+  memoryDir = join(dir, '.claude', 'projects', '-srv-work-repo', 'memory')
   mkdirSync(memoryDir, { recursive: true })
   // A stand-in for `cairn route --json` that also says what it was asked.
   cli = join(dir, 'cairn')
@@ -75,7 +75,7 @@ const tool = (name: string, input: Record<string, unknown>) => ({
 const writeMemory = (file: string, extra: Record<string, unknown> = {}) => ({
   hook_event_name: 'PostToolUse',
   session_id: 'b1d0c6a2-6f0e-4c55-9f1e-4b1c2a3d4e5f',
-  cwd: '/Users/cal/repo',
+  cwd: '/srv/work/repo',
   tool_name: 'Write',
   tool_input: { file_path: join(memoryDir, file), content: MEMORY },
   ...extra,
@@ -90,7 +90,7 @@ describe('the memory-mirror hook', () => {
     expect(reason).toContain('`cairn --instance personal learn "Deferred FKs go after the backfill, never before" --project <KEY> --body -`')
     expect(reason).toContain('cairn --instance personal relearn deferred-fks-go-after-the-backfill --body -')
     expect(reason).toContain('Lab work alone goes to croft.')
-    expect(readFileSync(join(dir, 'route-args'), 'utf8').trim()).toBe('route --json --cwd /Users/cal/repo')
+    expect(readFileSync(join(dir, 'route-args'), 'utf8').trim()).toBe('route --json --cwd /srv/work/repo')
   })
 
   it('reads an edited memory from disk and offers relearn first', async () => {
@@ -111,9 +111,9 @@ describe('the memory-mirror hook', () => {
     const at = (file_path: string) => writeMemory('x.md', { tool_input: { file_path, content: MEMORY } })
     expect((await run(at(join(memoryDir, 'MEMORY.md')))).out).toBe('')
     expect((await run(at(join(dir, '.claude', 'CLAUDE.md')))).out).toBe('')
-    expect((await run(at(join(dir, '.claude', 'projects', '-Users-cal-repo', 'notes.md')))).out).toBe('')
+    expect((await run(at(join(dir, '.claude', 'projects', '-srv-work-repo', 'notes.md')))).out).toBe('')
     expect((await run(at(join(memoryDir, 'data.json')))).out).toBe('')
-    expect((await run(at('/Users/cal/repo/docs/memory/lesson.md'))).out).toBe('')
+    expect((await run(at('/srv/work/repo/docs/memory/lesson.md'))).out).toBe('')
   })
 
   it('finds memory under CLAUDE_CONFIG_DIR too', async () => {
